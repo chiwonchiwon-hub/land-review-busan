@@ -6,6 +6,8 @@ import ReviewPanel, { type ReviewState } from "./ReviewPanel";
 import DesignPanel, { type DesignState } from "./DesignPanel";
 import CostPanel from "./CostPanel";
 import ReportSummary from "./ReportSummary";
+import ChatSearch from "./ChatSearch";
+import type { NlState } from "@/lib/nl-query";
 import { BUSAN_GUS } from "@/lib/regions";
 import { STATUS_STYLE } from "./UsePanel";
 import { USE_STATUS_LABEL } from "@/lib/use-rules";
@@ -124,7 +126,9 @@ export default function LandFinder() {
     if (group && (!existing || (existing.error && !existing.loading))) void loadReview(group);
   }
 
-  async function search() {
+  async function search(override?: NlState) {
+    const useCriteria = override?.criteria ?? criteria;
+    const useGus = override?.gus ?? gus;
     setLoading(true);
     setError(null);
     setSelectedId(null);
@@ -134,7 +138,7 @@ export default function LandFinder() {
       const res = await fetch("/api/land-search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...criteria, gus }),
+        body: JSON.stringify({ ...useCriteria, gus: useGus }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -160,6 +164,17 @@ export default function LandFinder() {
           wide && selected ? "hidden" : "flex"
         }`}
       >
+        <ChatSearch
+          state={{ criteria, gus }}
+          busy={loading}
+          onApply={(next, run) => {
+            setCriteria(next.criteria);
+            setGus(next.gus);
+            setDesignParams((p) => ({ ...p, floorHeight: DEFAULT_FLOOR_HEIGHT[next.criteria.purpose] }));
+            if (run) void search(next);
+          }}
+        />
+
         {/* 조건 입력 */}
         <section className="space-y-4 border-b border-zinc-200 p-4">
           <h2 className="text-base font-semibold">조건 입력</h2>
@@ -265,7 +280,7 @@ export default function LandFinder() {
 
           <button
             type="button"
-            onClick={search}
+            onClick={() => void search()}
             disabled={loading}
             className="w-full rounded bg-blue-600 py-2 font-semibold text-white disabled:bg-zinc-400"
           >
