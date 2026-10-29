@@ -72,6 +72,9 @@ export type ZonePart = {
   designatedYear: string; // VWorld 용도지역 도형의 지정 연도
 };
 
+// 건축할 수 없거나 제한이 큰 지역·지구 (lib/no-build.ts)
+export type NoBuildHit = { name: string; relation: string; reason: string; parcels?: number; areaShare?: number }; // parcels·areaShare: 그 지구에 걸린 필지 수와 대지 면적 대비 비율(0~1)
+
 export type LandReview = {
   pnus: string[];
   siteArea: number; // 대지면적(㎡): 묶인 필지의 토지대장 면적 합계
@@ -83,6 +86,7 @@ export type LandReview = {
   totals: { maxBuildingArea: number; maxFloorArea: number; bcr: number; far: number } | null; // 계산에서 뺀 부분은 제외한 합계
   multiZone: null | { smallestPart: number; rule: "weighted" | "separate"; text: string };
   landUse: { name: string; relation: string }[]; // 용도지역 외 지역·지구 (포함·저촉)
+  noBuild: { blocking: NoBuildHit[]; caution: NoBuildHit[] }; // 건축 불가(포함)·확인 필요 지역·지구
   checks: string[]; // "확인 필요" 안내
   relaxations: readonly string[];
   basis: { ordinance: string; effective: string; checkedOn: string; url: string; zoningSource: string; zoningDate: string };
@@ -191,6 +195,7 @@ export type SearchResult = {
     missingGeometry: number; // 경계 정보를 찾지 못해 "확인 불가"인 필지 수
     belowMinArea: number; // 면적 조건에 못 미친 일단의 토지 수
     excludedByUse: number; // 고른 용도로 법령상 지을 수 없어 뺀 일단의 토지 수
+    excludedByNoBuild: number; // 도로·공원·학교 시설 부지, 개발제한구역 등 건축 불가 지역·지구에 있어 뺀 수
     unsupportedZone: number; // 법령 표를 반영하지 않은 용도지역(관리·농림지역 등)이나 개발제한구역에 걸려 판정할 수 없어 뺀 수
   };
   candidateCount: number; // 소유·지목·면적 조건에 맞는 일단의 토지 수 (용도 판정 전)

@@ -7,13 +7,14 @@
 
 import { loadParcelZones, type ParcelZones } from "./busan-data";
 import { materializeGroup, type Candidates, type RawGroup } from "./land-search";
-import { reviewLandDetailed } from "./land-review";
+import { loadLandUse, reviewLandDetailed } from "./land-review";
+import { classifyLandUse } from "./no-build";
 import { DEFAULT_RESULT_LIMIT, type LandGroup, type SearchCriteria, type SearchResult } from "./land-types";
 import { GREENBELT_LIMIT, UNSUPPORTED_LIMIT, USE_PURPOSES, USE_STATUS_LABEL, assessUse, type UseReviewInput } from "./use-rules";
 import { SMALL_PART_LIMIT_M2, ZONE_RULES } from "./zoning-rules";
 
 type UseInfo = NonNullable<LandGroup["use"]>;
-type Verdict = { keep: boolean; reason: "use" | "unsupported" | null; use: UseInfo | null };
+type Verdict = { keep: boolean; reason: "use" | "unsupported" | "nobuild" | null; use: UseInfo | null };
 
 const cache = new Map<string, { at: number; verdict: Verdict }>();
 const CACHE_MS = 60 * 60 * 1000;
@@ -66,8 +67,45 @@ function approximate(g: RawGroup, pz: ParcelZones, purpose: string): Verdict {
   return a.overall === "not_allowed" ? { keep: false, reason: "use", use: null } : { keep: true, reason: null, use: null };
 }
 
+// VWorld를 한꺼번에 너무 많이 부르지 않도록 동시에 12개까지만
+let active = 0;
+const waiting: (() => void)[] = [];
+async function limited<T>(fn: () => Promise<T>): Promise<T> {
+  while (active >= 12) await new Promise<void>((r) => waiting.push(r));
+  active++;
+  try {
+    return await fn();
+  } finally {
+    active--;
+    waiting.shift()?.();
+  }
+}
+
+// 면적이 큰 필지 4개의 토지이용계획에서 건축 불가 지역·지구(도로·공원·학교 시설 부지, 개발제한구역 등)에 '포함'된 비율을 봄.
+// 면적의 절반 이상이면 제외. 조회에 실패한 필지는 판단하지 않고 그대로 둠(제외하지 않음).
+async function inNoBuildZone(group: LandGroup): Promise<boolean> {
+  const sample = [...group.parcels].sort((a, b) => b.area - a.area).slice(0, 4);
+  let checked = 0;
+  let blocked = 0;
+  await Promise.all(
+    sample.map(async (p) => {
+      try {
+        const rows = await limited(() => loadLandUse(p.pnu));
+        checked += p.area;
+        if (classifyLandUse(rows).blocking.length > 0) blocked += p.area;
+      } catch {
+        // 조회하지 못한 필지는 건너뜀
+      }
+    }),
+  );
+  return checked > 0 && blocked / checked >= 0.5;
+}
+
 // ② 정확한 판정 (도형을 겹쳐서 계산)
+const MAX_GROUP_PARCELS = 300; // 이보다 많은 필지가 묶인 땅은 개발 후보로 보기 어렵고 정밀 판정에 몇 분씩 걸려 판정하지 않음
+
 async function exact(group: LandGroup, purpose: string): Promise<Verdict> {
+  if (group.parcels.length > MAX_GROUP_PARCELS) return { keep: false, reason: "unsupported", use: null };
   const key = `${purpose}|${group.id}|${group.parcels.map((p) => p.pnu).join(",")}`;
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_MS) return hit.verdict;
@@ -78,7 +116,7 @@ async function exact(group: LandGroup, purpose: string): Promise<Verdict> {
   let verdict: Verdict;
   if (a.overall === "not_allowed") verdict = { keep: false, reason: "use", use };
   else if (a.overall === "unknown") verdict = { keep: false, reason: "unsupported", use };
-  else verdict = { keep: true, reason: null, use };
+  else verdict = (await inNoBuildZone(group)) ? { keep: false, reason: "nobuild", use } : { keep: true, reason: null, use };
   cache.set(key, { at: Date.now(), verdict });
   return verdict;
 }
@@ -87,7 +125,7 @@ export async function buildResult(c: Candidates, criteria: SearchCriteria): Prom
   const purpose = criteria.purpose;
   const supported = (USE_PURPOSES as readonly string[]).includes(purpose);
   const limit = Math.min(Math.max(Math.round(criteria.limit ?? DEFAULT_RESULT_LIMIT), 10), 300);
-  const stats = { ...c.stats, excludedByUse: 0, unsupportedZone: 0 };
+  const stats = { ...c.stats, excludedByUse: 0, unsupportedZone: 0, excludedByNoBuild: 0 };
 
   // ① 빠른 거름
   let pool = c.groups;
@@ -108,17 +146,22 @@ export async function buildResult(c: Candidates, criteria: SearchCriteria): Prom
 
   // ② 화면에 보낼 후보만 정확하게 (면적이 큰 순서로 limit개가 찰 때까지)
   const groups: LandGroup[] = [];
-  for (const raw of pool) {
-    if (groups.length >= limit) break;
-    const lg = materializeGroup(raw);
+  const BATCH = 10; // 한 번에 10곳씩 동시에 판정 (순서는 면적 큰 순 그대로 유지)
+  for (let i = 0; i < pool.length && groups.length < limit; i += BATCH) {
+    const batch = pool.slice(i, i + BATCH).map((raw) => materializeGroup(raw));
     if (!supported) {
-      groups.push(lg);
+      groups.push(...batch.slice(0, limit - groups.length));
       continue;
     }
-    const v = await exact(lg, purpose);
-    if (v.keep) groups.push({ ...lg, use: v.use ?? undefined });
-    else if (v.reason === "use") stats.excludedByUse++;
-    else stats.unsupportedZone++;
+    const verdicts = await Promise.all(batch.map((lg) => exact(lg, purpose)));
+    for (let k = 0; k < batch.length; k++) {
+      const v = verdicts[k];
+      if (groups.length >= limit) break;
+      if (v.keep) groups.push({ ...batch[k], use: v.use ?? undefined });
+      else if (v.reason === "use") stats.excludedByUse++;
+      else if (v.reason === "nobuild") stats.excludedByNoBuild++;
+      else stats.unsupportedZone++;
+    }
   }
 
   return {

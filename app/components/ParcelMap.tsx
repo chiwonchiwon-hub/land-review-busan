@@ -310,6 +310,25 @@ export default function ParcelMap({ groups, selectedId, onSelectGroup, design, v
     <div className="relative flex-1">
       {/* MapLibre가 position: relative를 덮어쓰므로 absolute 대신 h-full로 크기를 줍니다 */}
       <div ref={containerRef} className="h-full w-full" />
+      {/* 범례: 추천 땅의 색 = 소유 구분 (지도 오른쪽 아래, 출처 표시 위) */}
+      {groups.length > 0 && (
+        <div className="pointer-events-none absolute bottom-7 right-2 rounded-md bg-white/90 px-2.5 py-2 text-[11px] text-zinc-700 shadow" data-map-legend>
+          <div className="mb-1 font-semibold text-zinc-800">소유 구분</div>
+          <ul className="space-y-0.5">
+            {[
+              [OWNER_COLORS["국유지"], "국유지"],
+              [OWNER_COLORS["시 도유지"], "시유지"],
+              [OWNER_COLORS["군유지"], "구·군유지"],
+              [OWNER_COLORS.mixed, "여러 소유가 섞인 땅"],
+            ].map(([color, label]) => (
+              <li key={label} className="flex items-center gap-1.5">
+                <span className="inline-block h-2.5 w-2.5 rounded-sm" style={{ background: color }} />
+                {label}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       <div className="absolute left-3 top-14 flex overflow-hidden rounded-md bg-white text-sm shadow" role="group" aria-label="지도 보기 방식">
         {(["2d", "3d"] as const).map((v) => (
           <button

@@ -3,6 +3,7 @@
 
 import * as turf from "@turf/turf";
 import { getLandUse, VWorldError, type LandUseRow } from "./vworld";
+import { classifyParcels } from "./no-build";
 import { loadDong, loadZoningFile, type ZoningRecord } from "./busan-data";
 import { isBusanPnu } from "./regions";
 import { type LandReview, type ZonePart } from "./land-types";
@@ -22,7 +23,7 @@ const asPoly = (z: ZoningRecord): Poly => ({ type: "Feature", properties: {}, ge
 
 const landUseCache = new Map<string, { at: number; rows: LandUseRow[] }>();
 
-async function loadLandUse(pnu: string): Promise<LandUseRow[]> {
+export async function loadLandUse(pnu: string): Promise<LandUseRow[]> {
   const hit = landUseCache.get(pnu);
   if (hit && Date.now() - hit.at < 86_400_000) return hit.rows;
   const rows = await getLandUse(pnu);
@@ -317,6 +318,10 @@ export async function reviewLandDetailed(pnus: string[], options: { skipLandUse?
           },
     multiZone,
     landUse,
+    noBuild: classifyParcels(
+      pnus.map((pnu, i) => ({ area: dongs[pnu.slice(0, 8)].parcels[pnu].area, rows: landUseLists[i] ?? [] })),
+      siteArea,
+    ),
     checks,
     relaxations: RELAXATION_NOTES,
     basis: {

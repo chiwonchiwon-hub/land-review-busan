@@ -175,6 +175,35 @@ export default function ReviewPanel({
                 </div>
               )}
 
+              {r.noBuild.blocking.length > 0 && (
+                <div className="rounded border border-red-300 bg-red-50 p-2 text-xs" data-no-build>
+                  <div className="mb-1 font-semibold text-red-900">건축할 수 없는 지역·지구에 포함된 필지가 있어요</div>
+                  <ul className="list-disc space-y-1 pl-4 text-red-900">
+                    {r.noBuild.blocking.map((h) => (
+                      <li key={h.name}>
+                        <span className="font-medium">{h.name}</span> — {h.reason}
+                        {h.parcels !== undefined && h.areaShare !== undefined && (
+                          <span className="text-red-700"> (필지 {h.parcels}개, 대지 면적의 약 {Math.round(h.areaShare * 100)}%)</span>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {r.noBuild.caution.length > 0 && (
+                <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs">
+                  <div className="mb-1 font-semibold text-amber-900">건축 전에 허가·협의가 필요한 지역·지구</div>
+                  <ul className="list-disc space-y-1 pl-4 text-amber-900">
+                    {r.noBuild.caution.map((h) => (
+                      <li key={h.name + h.relation}>
+                        <span className="font-medium">{h.name}</span> <span className="text-amber-700">({h.relation})</span> — {h.reason}
+                        {h.parcels !== undefined && h.areaShare !== undefined && <span className="text-amber-700"> (필지 {h.parcels}개, 약 {Math.round(h.areaShare * 100)}%)</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
               {r.landUse.length > 0 && (
                 <details className="text-xs text-zinc-600">
                   <summary className="cursor-pointer font-medium">그 외 지역·지구 ({r.landUse.length}건, VWorld 토지이용계획)</summary>
