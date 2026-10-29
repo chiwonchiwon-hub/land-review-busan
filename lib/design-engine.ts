@@ -146,6 +146,15 @@ function findSpot(g: Grid, nw: number, nd: number, target?: XY): [number, number
   return best;
 }
 
+function pointInRing(p: XY, ring: XY[]) {
+  let c = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [xi, yi] = ring[i], [xj, yj] = ring[j];
+    if (yi > p[1] !== yj > p[1] && p[0] < ((xj - xi) * (p[1] - yi)) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+
 const rot = ([x, y]: XY, th: number): XY => [x * Math.cos(th) + y * Math.sin(th), -x * Math.sin(th) + y * Math.cos(th)];
 const unrot = ([x, y]: XY, th: number): XY => [x * Math.cos(th) - y * Math.sin(th), x * Math.sin(th) + y * Math.cos(th)];
 
@@ -249,7 +258,9 @@ type Plan = { buildings: PV[][]; mode: FloorsMode; label: string };
 type Ctx = { inset: Poly; proj: Proj; targetB: number };
 
 // 안마다 건축면적을 얼마나 쓰는지의 기본 비율
-const KIND_FACTOR: Record<DesignKind, number> = { siteFit: 1, bar: 0.9, tower: 0.6, lshape: 1, courtyard: 1, stepped: 1, twin: 1 };
+type SingleKind = Exclude<DesignKind, "barComplex" | "towerComplex">;
+const isComplex = (k: DesignKind): k is "barComplex" | "towerComplex" => k === "barComplex" || k === "towerComplex";
+const KIND_FACTOR: Record<SingleKind, number> = { siteFit: 1, bar: 0.9, tower: 0.6, lshape: 1, courtyard: 1, stepped: 1, twin: 1 };
 
 // 대지 순응형: 이격한 대지 안쪽을 건축면적 한도에 맞게 안쪽으로 줄여서 필지 모양을 따라가게 함
 function genSiteFit(c: Ctx): Plan | null {
@@ -400,7 +411,7 @@ function genTwin(c: Ctx): Plan | null {
   };
 }
 
-const GENERATORS: Record<DesignKind, (c: Ctx) => Plan | null> = {
+const GENERATORS: Record<SingleKind, (c: Ctx) => Plan | null> = {
   siteFit: genSiteFit,
   bar: genBar,
   tower: genTower,
@@ -464,10 +475,155 @@ function chooseFloors(
   return null;
 }
 
+
+// ── 공공주택 단지: 같은 모양의 동을 줄 맞춰 여러 개 놓음 ──
+const MAX_COMPLEX_BUILDINGS = 40; // 3D가 무거워지지 않게 하는 동 수 상한
+
+type CxDim = { w: number; d: number };
+
+// 대지를 여러 방향으로 돌려 보며 w×d 크기의 동을 줄 맞춰 최대한 많이 놓음 (남북 간격 gapNS, 동 길이 방향 간격 gapEW)
+function packComplex(inset: Poly, proj: Proj, dim: CxDim, gapNS: number, gapEW: number, maxFootprint: number): { rings: XY[][]; footprint: number } | null {
+  const polys = polygonsOf(inset).map((poly) => poly.map((ring) => ring.map((p) => proj.toXY(p))));
+  const outer = polys.flatMap((poly) => poly[0]);
+  const area = polys.reduce((s, poly) => s + ringArea(poly[0]) - poly.slice(1).reduce((q, r) => q + ringArea(r), 0), 0);
+  if (area < dim.w * dim.d) return null;
+
+  const mr = minRect(outer);
+  const thetas = [mr.theta, mr.theta + Math.PI / 2];
+  const edges: { len: number; th: number }[] = [];
+  for (const poly of polys) {
+    const ring = poly[0];
+    for (let k = 0, m = ring.length - 1; k < ring.length; m = k++) {
+      const dx = ring[k][0] - ring[m][0], dy = ring[k][1] - ring[m][1];
+      const len = Math.hypot(dx, dy);
+      if (len >= 15) edges.push({ len, th: Math.atan2(dy, dx) });
+    }
+  }
+  for (const ed of edges.sort((a, b) => b.len - a.len).slice(0, 2)) {
+    for (const th of [ed.th, ed.th + Math.PI / 2]) if (!thetas.some((x) => Math.abs(Math.sin(x - th)) < 0.05)) thetas.push(th);
+  }
+
+  const cell = Math.max(1, Math.sqrt(area / 12000));
+  let best: { rings: XY[][]; footprint: number } | null = null;
+  for (const theta of thetas) {
+    const g = buildGrid(polys.flatMap((poly) => poly.map((ring) => ring.map((p) => rot(p, theta)))), cell);
+    if (!g) continue;
+    const stride = g.nx + 1;
+    const fits = (x: number, y: number) => {
+      const i0 = Math.floor((x - g.minX) / g.c), i1 = Math.ceil((x + dim.w - g.minX) / g.c) - 1;
+      const j0 = Math.floor((y - g.minY) / g.c), j1 = Math.ceil((y + dim.d - g.minY) / g.c) - 1;
+      if (i0 < 0 || j0 < 0 || i1 >= g.nx || j1 >= g.ny) return false;
+      const cnt = g.sum[(j1 + 1) * stride + i1 + 1] - g.sum[j0 * stride + i1 + 1] - g.sum[(j1 + 1) * stride + i0] + g.sum[j0 * stride + i0];
+      return cnt === (i1 - i0 + 1) * (j1 - j0 + 1);
+    };
+    const pitch = dim.d + gapNS;
+    for (const off of [0, 0.33, 0.66]) {
+      const rings: XY[][] = [];
+      let fp = 0;
+      let y = g.minY + off * pitch;
+      const yEnd = g.minY + g.ny * g.c;
+      const xEnd = g.minX + g.nx * g.c;
+      rows: while (y + dim.d <= yEnd) {
+        let placed = false;
+        let x = g.minX;
+        while (x + dim.w <= xEnd) {
+          if (fits(x, y)) {
+            if (fp + dim.w * dim.d > maxFootprint || rings.length >= MAX_COMPLEX_BUILDINGS) break rows;
+            rings.push([[x, y], [x + dim.w, y], [x + dim.w, y + dim.d], [x, y + dim.d]].map((p) => unrot(p as XY, theta)));
+            fp += dim.w * dim.d;
+            placed = true;
+            x += dim.w + gapEW;
+          } else x += g.c;
+        }
+        y += placed ? pitch : g.c;
+      }
+      if (rings.length > 0 && (!best || fp > best.footprint)) best = { rings, footprint: fp };
+    }
+  }
+  return best;
+}
+
+function buildComplex(kind: "barComplex" | "towerComplex", job: Job, base: { proj: Proj; params: DesignParams; margin: number }): DesignedBuilding[] | null {
+  const { proj, params, margin } = base;
+  const inset = insetOf(job.shape, margin);
+  if (!inset || turf.area(inset) < 800) return null;
+
+  const floorCapArea = job.limit?.floorAreaLt !== undefined ? capBelow(job.limit.floorAreaLt) : undefined;
+  const maxF = floorCapArea !== undefined ? Math.min(job.maxF, floorCapArea) : job.maxF;
+  const floorsCap = Math.min(MAX_FLOORS, job.limit?.maxFloors ?? MAX_FLOORS);
+  const targetB = job.maxB * clamp(params.coverage, 0.3, 1) * SAFETY;
+  const dims: CxDim[] = kind === "barComplex" ? [{ w: 62, d: 13 }, { w: 50, d: 13 }, { w: 38, d: 13 }] : [{ w: 27, d: 27 }, { w: 23, d: 23 }];
+  const floorOptions = params.floors ? [params.floors] : [2, 3, 4, 5, 6, 8, 10, 12, 15, 18, 20, 25, 30, 35, 40];
+
+  let best: { rings: XY[][]; N: number; gap: number; floorArea: number } | null = null;
+  for (const N of floorOptions) {
+    if (N > floorsCap) continue;
+    const H = N * params.floorHeight;
+    for (const dim of dims) {
+      if (H > SLENDER * Math.min(dim.w, dim.d) + 1e-6) continue;
+      const gap = clamp(0.5 * H, 15, 40); // 동 사이 거리 가정: 높이의 절반, 최소 15m
+      const gapEW = kind === "barComplex" ? clamp(0.3 * H, 10, 25) : gap;
+      const maxFp = Math.min(targetB, (maxF * SAFETY) / N);
+      if (maxFp < dim.w * dim.d) continue;
+      const pk = packComplex(inset, proj, dim, gap, gapEW, maxFp);
+      if (!pk) continue;
+      const fa = pk.footprint * N;
+      if (!best || fa > best.floorArea * 1.005) best = { rings: pk.rings, N, gap, floorArea: fa };
+    }
+  }
+  if (!best) return null;
+
+  // 모든 동이 대지 안에 있는지 확인하고, 한도를 넘으면 뒤쪽 동부터 뺌
+  let rings = best.rings.filter((r) => within(llPoly(r, proj), inset));
+  const areaOf = (r: XY[]) => geoArea(r, proj);
+  const total = () => rings.reduce((s, r) => s + areaOf(r), 0);
+  while (rings.length > 0 && (total() > job.maxB * SAFETY || total() * best.N > maxF * SAFETY)) rings = rings.slice(0, -1);
+  if (rings.length === 0) return null;
+
+  const volumes: DesignVolume[] = rings.map((r) => ({
+    ring: r.map(([x, y]) => [round2(x), round2(y)] as XY),
+    startFloor: 0,
+    floors: best.N,
+    area: floor2(areaOf(r)),
+    role: "main",
+  }));
+  const footprintArea = floor2(volumes.reduce((s, v) => s + v.area, 0));
+  const floorArea = floor2(footprintArea * best.N);
+  const notes = [
+    `동 ${volumes.length}개 × ${best.N}층, 동 사이 거리 ${Math.round(best.gap)}m (가정: 높이의 0.5배, 최소 15m). 일조·채광 사선과 법정 동간 거리는 단지 계획 단계에서 따로 검토해야 합니다.`,
+  ];
+  if (floorCapArea !== undefined && floorCapArea < job.maxF) notes.push(`${job.limit!.floorAreaLt!.toLocaleString("ko-KR")}㎡ 미만 규정에 따라 연면적을 ${floorCapArea.toLocaleString("ko-KR")}㎡ 이내로 줄였습니다`);
+  if (job.limit?.maxFloors !== undefined && best.N >= job.limit.maxFloors) notes.push(`용도 규정에 따라 ${job.limit.maxFloors}층 이하로 제한했습니다`);
+  if (volumes.length >= MAX_COMPLEX_BUILDINGS) notes.push(`3D 화면이 무거워지지 않도록 동 수를 ${MAX_COMPLEX_BUILDINGS}개까지만 놓았습니다`);
+  return [
+    {
+      zone: job.zone,
+      volumes,
+      footprintArea,
+      floors: best.N,
+      height: round2(best.N * params.floorHeight),
+      floorArea,
+      maxBuildingArea: job.maxB,
+      maxFloorArea: maxF,
+      notes,
+    },
+  ];
+}
+
+// 이격을 둔 대지 안쪽 영역은 안마다 똑같으므로 한 번만 계산해 둠 (필지가 많은 큰 땅에서 특히 오래 걸림)
+const insetCache = new WeakMap<object, Map<number, Poly | undefined>>();
+function insetOf(shape: Poly, margin: number): Poly | undefined {
+  let m = insetCache.get(shape);
+  if (!m) insetCache.set(shape, (m = new Map()));
+  if (!m.has(margin)) m.set(margin, turf.buffer(shape, -margin, { units: "meters" }) as Poly | undefined);
+  return m.get(margin);
+}
+
 // ── 한 땅(또는 용도지역 부분)에 한 가지 안을 만들어 건물로 ──
 function buildJob(kind: DesignKind, job: Job, ctxBase: { proj: Proj; params: DesignParams; margin: number }, notes: string[]): DesignedBuilding[] | null {
+  if (isComplex(kind)) return buildComplex(kind, job, ctxBase);
   const { proj, params, margin } = ctxBase;
-  const inset = turf.buffer(job.shape, -margin, { units: "meters" }) as Poly | undefined;
+  const inset = insetOf(job.shape, margin);
   if (!inset || turf.area(inset) < 100) return null;
 
   const floorCapArea = job.limit?.floorAreaLt !== undefined ? capBelow(job.limit.floorAreaLt) : undefined;
@@ -475,11 +631,11 @@ function buildJob(kind: DesignKind, job: Job, ctxBase: { proj: Proj; params: Des
   const coverage = clamp(params.coverage, 0.3, 1);
   // 연면적 상한이 걸리면 건축면적을 줄여 3층 안팎으로 계획 (바닥을 넓게 펴면 1층 건물이 되어 부자연스러움)
   const capBound = floorCapArea !== undefined && floorCapArea < job.maxF;
-  let targetB = job.maxB * coverage * KIND_FACTOR[kind];
+  let targetB = job.maxB * coverage * KIND_FACTOR[kind as SingleKind];
   if (capBound) targetB = Math.min(targetB, floorCapArea / 3);
 
   for (let attempt = 0; attempt < 5; attempt++) {
-    const plan = GENERATORS[kind]({ inset, proj, targetB });
+    const plan = GENERATORS[kind as SingleKind]({ inset, proj, targetB });
     if (!plan) return null;
 
     // 덩어리마다 면적(측지 면적)과 가장 짧은 변
@@ -550,7 +706,7 @@ function analyzeSite(shape: Poly, proj: Proj): SiteMetrics | null {
   return { area: round2(area), length: round2(mr.len), width: round2(mr.wid), aspect: round2(mr.len / Math.max(mr.wid, 1)), convexity: round2(convexity) };
 }
 
-function scoreOption(kind: DesignKind, m: SiteMetrics, stats: { coverageUse: number; farUse: number; floors: number; autoFloors: number }, purpose: string) {
+function scoreOption(kind: DesignKind, m: SiteMetrics, stats: { coverageUse: number; farUse: number; floors: number; autoFloors: number; count: number }, purpose: string) {
   const why: string[] = [];
   let bonus = 0;
   const fp = Math.round(stats.coverageUse * 100);
@@ -582,13 +738,25 @@ function scoreOption(kind: DesignKind, m: SiteMetrics, stats: { coverageUse: num
       bonus = (stats.floors >= 4 && stats.floors <= 14 ? 14 : 4) + (purpose === "공공주택" ? 6 : 0);
       why.push("남쪽으로 층을 낮춰 테라스를 만들어 일조와 옥상 정원에 유리해요");
       break;
+    case "barComplex":
+      bonus = 40;
+      why.push(`${stats.count}개 동을 줄 맞춰 배치한 판상형 아파트 단지예요. 남향 위주로 채광이 좋고 공공주택에서 가장 흔한 배치예요`);
+      break;
+    case "towerComplex":
+      bonus = 34;
+      why.push(`${stats.count}개 동의 타워형 아파트 단지예요. 동 사이를 넓게 띄워 조망과 통풍에 유리해요`);
+      break;
     case "twin":
       bonus = 26 * clamp((m.area - 7000) / 9000, 0, 1);
       why.push(m.area >= 10000 ? "대지가 넓어 두 동을 나란히 놓고 사이에 마당을 둘 수 있어요" : "대지가 넓지 않아 두 동으로 나누면 마당이 좁아요");
       break;
   }
   why.push(`건축면적 한도의 ${fp}%, 연면적 한도의 ${far}%를 쓰는 안이에요`);
-  const score = clamp(Math.round(18 + 30 * Math.min(1, stats.farUse) + 24 * Math.min(1, stats.coverageUse) + bonus), 0, 100);
+  let score = clamp(Math.round(18 + 30 * Math.min(1, stats.farUse) + 24 * Math.min(1, stats.coverageUse) + bonus), 0, 100);
+  if (purpose === "공공주택" && !isComplex(kind)) {
+    score = Math.min(score, 58); // 공공주택은 여러 동의 단지가 일반적
+    why.push("공공주택은 여러 동을 단지로 배치하는 것이 일반적이라 동 한두 개짜리 안은 점수를 낮췄어요");
+  }
   return { score, why };
 }
 
@@ -669,7 +837,7 @@ export function designOptions(detail: ReviewDetail, paramsIn: DesignParams, purp
 
   // 대지 분석: 가장 넓은 부분을 기준으로
   const main = usable.slice().sort((a, b) => b.maxB - a.maxB)[0];
-  const mainInset = turf.buffer(main.shape, -margin, { units: "meters" }) as Poly | undefined;
+  const mainInset = insetOf(main.shape, margin);
   const metrics = mainInset ? analyzeSite(mainInset, proj) : null;
   if (!metrics) return { options: [emptyDesign("이격 거리를 둔 건물을 놓을 자리가 없습니다.")], recommendedId: null, metrics: null };
 
@@ -677,13 +845,18 @@ export function designOptions(detail: ReviewDetail, paramsIn: DesignParams, purp
   const autoFloors = clamp(Math.floor(main.maxF / Math.max(main.maxB * 0.6, 1)), 1, MAX_FLOORS);
 
   const designs: BuildingDesign[] = [];
-  for (const kind of Object.keys(GENERATORS) as DesignKind[]) {
+  const kinds: DesignKind[] = [...(Object.keys(GENERATORS) as SingleKind[]), ...(purpose === "공공주택" ? (['barComplex', 'towerComplex'] as const) : [])];
+  // 아주 넓은 땅(15만㎡ 이상)은 계산이 오래 걸리는 안 몇 가지를 생략
+  const hugeSite = metrics.area > 150_000;
+  if (hugeSite) commonNotes.push("대지가 매우 넓어(15만㎡ 이상) 계산 시간 때문에 ㄱ자·ㄷ자·계단식 안은 만들지 않았습니다.");
+  for (const kind of kinds) {
+    if (hugeSite && (kind === "lshape" || kind === "courtyard" || kind === "stepped")) continue;
     const tk = Date.now();
     const buildings: DesignedBuilding[] = [];
     const notes = [...commonNotes];
     for (const job of usable) {
       let built = buildJob(kind, job, { proj, params, margin }, notes);
-      if (!built && kind !== "bar") {
+      if (!built && kind !== "bar" && !isComplex(kind)) {
         built = buildJob("bar", job, { proj, params, margin }, notes);
         if (built) notes.push(`${job.zone ?? "이 땅"}에는 ${DESIGN_KIND_NAME[kind]}을 놓을 수 없어 판상형으로 대신했습니다.`);
       }
@@ -700,7 +873,13 @@ export function designOptions(detail: ReviewDetail, paramsIn: DesignParams, purp
     if (buildings.length === 0) continue;
 
     // 검증: 모든 덩어리가 대지 안에 있는가
-    const insideSite = buildings.every((b) => b.volumes.every((v) => within(llPoly(v.ring, proj), site)));
+    const allVolumes = buildings.flatMap((b) => b.volumes);
+    const siteXY = polygonsOf(site).map((poly) => poly.map((r) => r.map((p) => proj.toXY(p))));
+    const pointInSite = (p: XY) => siteXY.some((poly) => pointInRing(p, poly[0]) && !poly.slice(1).some((h) => pointInRing(p, h)));
+    const insideSite =
+      allVolumes.length <= 8
+        ? allVolumes.every((v) => within(llPoly(v.ring, proj), site))
+        : allVolumes.every((v) => v.ring.every((p, i) => pointInSite(p) && pointInSite([(p[0] + v.ring[(i + 1) % v.ring.length][0]) / 2, (p[1] + v.ring[(i + 1) % v.ring.length][1]) / 2])));
     const footprintArea = floor2(buildings.reduce((s, b) => s + b.footprintArea, 0));
     const floorArea = floor2(buildings.reduce((s, b) => s + b.floorArea, 0));
     const withinUse = buildings.every((b) => {
@@ -711,7 +890,7 @@ export function designOptions(detail: ReviewDetail, paramsIn: DesignParams, purp
     const coverageUse = footprintArea / review.totals.maxBuildingArea;
     const farUse = floorArea / review.totals.maxFloorArea;
     const maxFloors = Math.max(...buildings.map((b) => b.floors));
-    const { score, why } = scoreOption(kind, metrics, { coverageUse, farUse, floors: maxFloors, autoFloors }, purpose);
+    const { score, why } = scoreOption(kind, metrics, { coverageUse, farUse, floors: maxFloors, autoFloors, count: buildings.reduce((s, b) => s + b.volumes.length, 0) }, purpose);
 
     designs.push({
       params,

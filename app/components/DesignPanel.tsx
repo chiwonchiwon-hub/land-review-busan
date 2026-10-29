@@ -243,6 +243,11 @@ export default function DesignPanel({
                 건물 {i + 1}
                 {b.zone && <span className="font-normal text-zinc-500"> · {b.zone} 부분</span>}
               </div>
+              {b.volumes.length > 6 ? (
+                <p className="mt-1 text-zinc-700">
+                  동 {b.volumes.length}개 × {b.volumes[0].floors}층 (동당 바닥 약 {fmt(b.volumes[0].area)}㎡)
+                </p>
+              ) : (
               <ul className="mt-1 space-y-0.5 text-zinc-700">
                 {b.volumes.map((v, vi) => (
                   <li key={vi}>
@@ -250,6 +255,7 @@ export default function DesignPanel({
                   </li>
                 ))}
               </ul>
+              )}
               <div className="mt-1 text-zinc-600">
                 건축면적 {fmt(b.footprintArea)}㎡ · 연면적 {fmt(b.floorArea)}㎡ · 높이 {fmt(b.height)}m
               </div>

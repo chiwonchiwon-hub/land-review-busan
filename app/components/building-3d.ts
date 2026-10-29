@@ -160,6 +160,7 @@ export function buildDesignGroup(design: BuildingDesign): THREE.Group {
   }
 
   const allRings: XY[][] = [];
+  const many = design.buildings.reduce((s, x) => s + x.volumes.length, 0) > 16; // 동이 많으면 모서리 선·옥상 설비를 생략해 가볍게
   design.buildings.forEach((b, bi) => {
     const group = new THREE.Group();
     group.name = `건물 ${bi + 1}${b.zone ? ` (${b.zone})` : ""}`;
@@ -178,9 +179,11 @@ export function buildDesignGroup(design: BuildingDesign): THREE.Group {
         const mesh = new THREE.Mesh(geo, mats);
         mesh.position.z = z;
         group.add(mesh);
-        const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 25), lineMat);
-        edges.position.z = z;
-        group.add(edges);
+        if (!many) {
+          const edges = new THREE.LineSegments(new THREE.EdgesGeometry(geo, 25), lineMat);
+          edges.position.z = z;
+          group.add(edges);
+        }
       };
 
       // 1층은 키 큰 유리(로비), 나머지는 일반 외벽. 재료 순서: [윗면·아랫면, 옆면]
@@ -198,7 +201,7 @@ export function buildDesignGroup(design: BuildingDesign): THREE.Group {
         roof.position.z = z0 + height;
         group.add(roof);
 
-        if (isTop) {
+        if (isTop && !many) {
           const c = centroidOf(v.ring);
           if (inRing(c, v.ring) && distToRing(c, v.ring) > 3) {
             const size = Math.max(2, Math.min(8, distToRing(c, v.ring) * 0.9));
