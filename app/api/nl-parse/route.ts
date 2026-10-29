@@ -25,6 +25,7 @@ const SYSTEM = `너는 부산 국·공유지 검색 조건을 뽑는 도우미�
  "clarify": string|null
 }
 whole_busan은 부산 전체를 뜻할 때, gus는 구·군 이름, dongs는 읍·면·동 이름(예: 좌동), min_area_m2는 최소 면적(㎡, 평이면 ㎡로 환산), include_jimok은 포함하라고 한 지목, exclude_jimok은 제외하라고 한 지목, limit은 보여 줄 개수, clarify는 알아듣기 어려울 때 사용자에게 되물을 한 문장이야.
+면적 환산: 1평 = 3.3058㎡. '천'은 1000, '만'은 10000이야. 예) 500평 = 1653, 천 평 = 3306, 2천㎡ = 2000, 3만㎡ = 30000. 숫자를 계산하고 반올림해서 정수로 줘.
 구·군은 ${BUSAN_GUS.map((g) => g.name).join(", ")} 중에서만. 지목은 ${ALL_JIMOK.join(", ")} 중에서만.`;
 
 export async function POST(request: Request) {
