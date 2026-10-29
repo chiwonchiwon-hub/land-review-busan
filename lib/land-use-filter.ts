@@ -8,14 +8,15 @@
 import { loadParcelZones, type ParcelZones } from "./busan-data";
 import { materializeGroup, type Candidates, type RawGroup } from "./land-search";
 import { loadLandUse, reviewLandDetailed } from "./land-review";
-import { classifyLandUse } from "./no-build";
+import { classifyLandUse, roadAccessCheck } from "./no-build";
+import { checkRoadAccess } from "./road-access";
 import { NON_URBAN_NOT_ALLOWED } from "./non-urban-rules";
 import { DEFAULT_RESULT_LIMIT, type LandGroup, type SearchCriteria, type SearchResult } from "./land-types";
 import { GREENBELT_LIMIT, UNSUPPORTED_LIMIT, USE_PURPOSES, USE_STATUS_LABEL, assessUse, type UseReviewInput } from "./use-rules";
 import { SMALL_PART_LIMIT_M2, ZONE_RULES } from "./zoning-rules";
 
 type UseInfo = NonNullable<LandGroup["use"]>;
-type Verdict = { keep: boolean; reason: "use" | "unsupported" | "nobuild" | null; use: UseInfo | null };
+type Verdict = { keep: boolean; reason: "use" | "unsupported" | "nobuild" | "noroad" | null; use: UseInfo | null };
 
 const cache = new Map<string, { at: number; verdict: Verdict }>();
 const CACHE_MS = 60 * 60 * 1000;
@@ -108,6 +109,22 @@ async function inNoBuildZone(group: LandGroup): Promise<boolean> {
   return checked > 0 && blocked / checked >= 0.5;
 }
 
+// 땅의 경계가 어떤 길(국가기본도 도로)에도 접하지 않고, 토지이용계획의 도시·군계획도로 접면도 없으면 맹지로 보고 제외 (건축법 제44조).
+// 접한 길이 있지만 폭이 6m에 못 미치는 경우는 제외하지 않고 검토 화면에서 확인 필요로 알립니다:
+// 국가기본도의 도로 폭은 모를 때 3m로 적힌 값이 많아(전체의 1/3) 폭만으로 건축 불가를 단정하기 어렵기 때문입니다.
+async function isLandlocked(group: LandGroup): Promise<boolean> {
+  if (group.parcels.length > 100) return false;
+  try {
+    const res = await limited(() => checkRoadAccess(group.geometry, group.bbox));
+    if (res.status !== "none") return false;
+    const sample = [...group.parcels].sort((x, y) => y.area - x.area).slice(0, 4);
+    const rows = (await Promise.all(sample.map((p) => limited(() => loadLandUse(p.pnu)).catch(() => [])))).flat();
+    return roadAccessCheck(rows) !== null; // 도시·군계획도로(너비 6m 이상) 접함이 확인되면 맹지가 아님
+  } catch {
+    return false;
+  }
+}
+
 // ② 정확한 판정 (도형을 겹쳐서 계산)
 const MAX_GROUP_PARCELS = 300; // 이보다 많은 필지가 묶인 땅은 개발 후보로 보기 어렵고 정밀 판정에 몇 분씩 걸려 판정하지 않음
 
@@ -123,7 +140,9 @@ async function exact(group: LandGroup, purpose: string): Promise<Verdict> {
   let verdict: Verdict;
   if (a.overall === "not_allowed") verdict = { keep: false, reason: "use", use };
   else if (a.overall === "unknown") verdict = { keep: false, reason: "unsupported", use };
-  else verdict = (await inNoBuildZone(group)) ? { keep: false, reason: "nobuild", use } : { keep: true, reason: null, use };
+  else if (await inNoBuildZone(group)) verdict = { keep: false, reason: "nobuild", use };
+  else if (await isLandlocked(group)) verdict = { keep: false, reason: "noroad", use };
+  else verdict = { keep: true, reason: null, use };
   cache.set(key, { at: Date.now(), verdict });
   return verdict;
 }
@@ -132,7 +151,7 @@ export async function buildResult(c: Candidates, criteria: SearchCriteria): Prom
   const purpose = criteria.purpose;
   const supported = (USE_PURPOSES as readonly string[]).includes(purpose);
   const limit = Math.min(Math.max(Math.round(criteria.limit ?? DEFAULT_RESULT_LIMIT), 10), 300);
-  const stats = { ...c.stats, excludedByUse: 0, unsupportedZone: 0, excludedByNoBuild: 0 };
+  const stats = { ...c.stats, excludedByUse: 0, unsupportedZone: 0, excludedByNoBuild: 0, excludedByNoRoad: 0 };
 
   // ① 빠른 거름
   let pool = c.groups;
@@ -167,6 +186,7 @@ export async function buildResult(c: Candidates, criteria: SearchCriteria): Prom
       if (v.keep) groups.push({ ...batch[k], use: v.use ?? undefined });
       else if (v.reason === "use") stats.excludedByUse++;
       else if (v.reason === "nobuild") stats.excludedByNoBuild++;
+      else if (v.reason === "noroad") stats.excludedByNoRoad++;
       else stats.unsupportedZone++;
     }
   }

@@ -87,6 +87,7 @@ export type LandReview = {
   multiZone: null | { smallestPart: number; rule: "weighted" | "separate"; text: string };
   landUse: { name: string; relation: string }[]; // 용도지역 외 지역·지구 (포함·저촉)
   noBuild: { blocking: NoBuildHit[]; caution: NoBuildHit[] }; // 건축 불가(포함)·확인 필요 지역·지구
+  roadAccess: { status: "ok" | "short" | "narrow" | "none" | "unknown"; bestWidth: number | null; wideContactM: number; note: string } | null; // 접도 요건(건축법 제44조) 판정. 확인하지 않았으면 null
   checks: string[]; // "확인 필요" 안내
   relaxations: readonly string[];
   basis: { ordinance: string; effective: string; checkedOn: string; url: string; zoningSource: string; zoningDate: string };
@@ -195,6 +196,7 @@ export type SearchResult = {
     missingGeometry: number; // 경계 정보를 찾지 못해 "확인 불가"인 필지 수
     belowMinArea: number; // 면적 조건에 못 미친 일단의 토지 수
     excludedByUse: number; // 고른 용도로 법령상 지을 수 없어 뺀 일단의 토지 수
+    excludedByNoRoad: number; // 너비 6m 이상 도로에 접하지 못해(맹지 등) 건축법상 지을 수 없어 뺀 수
     excludedByNoBuild: number; // 도로·공원·학교 시설 부지, 개발제한구역 등 건축 불가 지역·지구에 있어 뺀 수
     unsupportedZone: number; // 법령 표를 반영하지 않은 용도지역(관리·농림지역 등)이나 개발제한구역에 걸려 판정할 수 없어 뺀 수
   };

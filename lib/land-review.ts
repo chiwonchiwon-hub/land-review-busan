@@ -4,6 +4,7 @@
 import * as turf from "@turf/turf";
 import { getLandUse, VWorldError, type LandUseRow } from "./vworld";
 import { classifyParcels, roadAccessCheck } from "./no-build";
+import { checkRoadAccess, type RoadAccess } from "./road-access";
 import type { NoBuildHit } from "./land-types";
 import { NON_URBAN_NOT_ALLOWED } from "./non-urban-rules";
 import { loadDong, loadZoningFile, type ZoningRecord } from "./busan-data";
@@ -269,9 +270,17 @@ export async function reviewLandDetailed(pnus: string[], options: { skipLandUse?
     landUse.push({ name: row.name, relation: row.relation });
   }
   const applies = landUse.filter((l) => l.relation === "포함" || l.relation === "저촉");
+  let roadAccess: RoadAccess | null = null;
   if (!options.skipLandUse) {
-    const roadMsg = roadAccessCheck(landUseLists.flat());
-    if (roadMsg) checks.push(roadMsg);
+    const bboxSite = turf.bbox(site) as [number, number, number, number];
+    roadAccess = pnus.length > 150 ? null : await checkRoadAccess(site.geometry as GeoJSON.Polygon | GeoJSON.MultiPolygon, bboxSite);
+    const planned = roadAccessCheck(landUseLists.flat()); // 도시·군계획도로(토지이용계획)에서 너비 6m 이상 접함이 확인되면 null
+    const BASE = "건축법 제44조·시행령 제28조②: 연면적 2,000㎡ 이상 건축물의 대지는 너비 6m 이상 도로에 4m 이상 접해야 합니다";
+    const confirmed = roadAccess?.status === "ok" || planned === null; // 국가기본도 또는 도시계획도로 중 하나로 접도 확인
+    if (!confirmed) {
+      if (roadAccess && roadAccess.status !== "unknown") checks.push(`${roadAccess.note}. ${BASE}`);
+      else if (planned) checks.push(planned);
+    }
   }
   const used = new Set<string>();
   for (const l of applies) {
@@ -331,6 +340,7 @@ export async function reviewLandDetailed(pnus: string[], options: { skipLandUse?
           },
     multiZone,
     landUse,
+    roadAccess,
     noBuild: mergeNoBuild(
       classifyParcels(
         pnus.map((pnu, i) => ({ area: dongs[pnu.slice(0, 8)].parcels[pnu].area, rows: landUseLists[i] ?? [] })),

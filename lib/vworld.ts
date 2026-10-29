@@ -196,3 +196,38 @@ export async function getParcelsByDong(ldCode: string): Promise<ParcelCollection
   const rest = await fetchPages(totalPages, async (page) => (await fetchPage(page)).features);
   return { type: "FeatureCollection", features: [...first.features, ...rest] };
 }
+
+// 국가기본도 도로 중심선과 도로 폭(rvwd, m). 골목 같은 작은 길도 들어 있음
+export type RoadLine = { id: string; width: number; lines: number[][][] };
+
+export async function getRoadsInBox(minLng: number, minLat: number, maxLng: number, maxLat: number): Promise<RoadLine[]> {
+  const roads: RoadLine[] = [];
+  for (let page = 1; page <= 4; page++) {
+    const params = new URLSearchParams({
+      service: "data",
+      request: "GetFeature",
+      data: "LT_L_N3A0020000",
+      geomFilter: `BOX(${minLng},${minLat},${maxLng},${maxLat})`,
+      crs: "EPSG:4326",
+      format: "json",
+      size: "1000",
+      page: String(page),
+      domain: DOMAIN,
+      key: getKey(),
+    });
+    const res = await fetch(`${DATA_API}?${params}`, { cache: "no-store" });
+    if (!res.ok) throw new VWorldError(`VWorld 도로 응답 오류 (HTTP ${res.status})`);
+    const json = await readJson(res);
+    const response = json.response;
+    if (response.status === "NOT_FOUND") break;
+    if (response.status !== "OK") throw new VWorldError(`VWorld 오류: ${response.error?.text ?? response.status}`);
+    for (const f of response.result.featureCollection.features as GeoJSON.Feature<GeoJSON.MultiLineString | GeoJSON.LineString>[]) {
+      const width = Number((f.properties as Record<string, string>)?.rvwd);
+      if (!Number.isFinite(width) || width <= 0) continue;
+      const lines = f.geometry.type === "LineString" ? [f.geometry.coordinates] : f.geometry.coordinates;
+      roads.push({ id: String((f.properties as Record<string, string>)?.ufid ?? roads.length), width, lines });
+    }
+    if (Number(response.page?.current) >= Number(response.page?.total)) break;
+  }
+  return roads;
+}

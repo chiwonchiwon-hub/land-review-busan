@@ -304,7 +304,7 @@ export default function LandFinder() {
               <p className="mt-1">
                 국·공유 필지 {result.stats.publicParcels.toLocaleString("ko-KR")}개 중 지목 제외 {result.stats.excludedByJimok.toLocaleString("ko-KR")}개, 면적 미달{" "}
                 {result.stats.belowMinArea.toLocaleString("ko-KR")}곳
-                {result.usableCount !== null && `, 법령상 불가 ${result.stats.excludedByUse.toLocaleString("ko-KR")}곳, 판정 범위 밖 ${result.stats.unsupportedZone.toLocaleString("ko-KR")}곳, 건축 불가 지역·지구(도로·공원·학교 시설 부지, 개발제한구역 등) ${(result.stats.excludedByNoBuild ?? 0).toLocaleString("ko-KR")}곳`}
+                {result.usableCount !== null && `, 법령상 불가 ${result.stats.excludedByUse.toLocaleString("ko-KR")}곳, 판정 범위 밖 ${result.stats.unsupportedZone.toLocaleString("ko-KR")}곳, 건축 불가 지역·지구(도로·공원·학교 시설 부지, 개발제한구역 등) ${(result.stats.excludedByNoBuild ?? 0).toLocaleString("ko-KR")}곳, 도로에 접하지 않음(맹지) ${(result.stats.excludedByNoRoad ?? 0).toLocaleString("ko-KR")}곳`}
                 {result.stats.missingGeometry > 0 && `, 경계 확인 불가 ${result.stats.missingGeometry}개`} · VWorld 기준일 {result.dataDate}
               </p>
             </details>
