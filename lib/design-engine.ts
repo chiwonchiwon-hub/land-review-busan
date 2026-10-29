@@ -96,7 +96,7 @@ function buildGrid(rings: XY[][], cell: number): Grid | null {
   let c = cell;
   let nx = Math.max(1, Math.ceil((maxX - minX) / c));
   let ny = Math.max(1, Math.ceil((maxY - minY) / c));
-  while (nx * ny > 90000) {
+  while (nx * ny > 25000) {
     c *= 1.25;
     nx = Math.max(1, Math.ceil((maxX - minX) / c));
     ny = Math.max(1, Math.ceil((maxY - minY) / c));
@@ -160,9 +160,9 @@ function placeRect(shape: Poly, target: number, proj: Proj, opts: PlaceOpts): Pl
   if (polyArea < 4) return null;
   const T = Math.min(target, polyArea * 0.95);
   const centroid = proj.toXY(turf.centroid(shape).geometry.coordinates as XY);
-  const cell = Math.min(3, Math.max(0.5, Math.sqrt(polyArea / 15000)));
+  const cell = Math.min(3, Math.max(0.8, Math.sqrt(polyArea / 6000)));
 
-  const degrees = opts.angles ? opts.angles.map((a) => (a * 180) / Math.PI) : Array.from({ length: 12 }, (_, i) => i * 15);
+  const degrees = opts.angles ? opts.angles.map((a) => (a * 180) / Math.PI) : Array.from({ length: 6 }, (_, i) => i * 30);
   if (!opts.angles) {
     const edges: { len: number; deg: number }[] = [];
     for (const poly of polys) {
@@ -176,7 +176,11 @@ function placeRect(shape: Poly, target: number, proj: Proj, opts: PlaceOpts): Pl
     for (const e of edges.sort((a, b) => b.len - a.len).slice(0, 4)) if (!degrees.some((d) => Math.abs(d - e.deg) < 3)) degrees.push(e.deg);
   }
 
-  const gridFor = (theta: number) => buildGrid(polys.flatMap((poly) => poly.map((ring) => ring.map((p) => rot(p, theta)))), cell);
+  const gridCache = new Map<number, Grid | null>();
+  const gridFor = (theta: number) => {
+    if (!gridCache.has(theta)) gridCache.set(theta, buildGrid(polys.flatMap((poly) => poly.map((ring) => ring.map((p) => rot(p, theta)))), cell));
+    return gridCache.get(theta)!;
+  };
   const dims = (aspect: number, s: number): [number, number] => [Math.sqrt(T * aspect) * s, Math.sqrt(T / aspect) * s];
   const cells = (g: Grid, w: number, d: number): [number, number] => [Math.max(1, Math.ceil(w / g.c)), Math.max(1, Math.ceil(d / g.c))];
 
@@ -196,7 +200,7 @@ function placeRect(shape: Poly, target: number, proj: Proj, opts: PlaceOpts): Pl
       if (!fits(1)) {
         if (!fits(0.05)) continue;
         let lo = 0.05, hi = 1;
-        for (let it = 0; it < 10; it++) {
+        for (let it = 0; it < 7; it++) {
           const mid = (lo + hi) / 2;
           if (fits(mid)) lo = mid; else hi = mid;
         }
@@ -252,7 +256,7 @@ function genSiteFit(c: Ctx): Plan | null {
   let shape: Poly | undefined = c.inset;
   if (turf.area(c.inset) > c.targetB) {
     let lo = 0, hi = 90;
-    for (let i = 0; i < 16; i++) {
+    for (let i = 0; i < 11; i++) {
       const mid = (lo + hi) / 2;
       const b = turf.buffer(c.inset, -mid, { units: "meters" }) as Poly | undefined;
       if (b && turf.area(b) > c.targetB) lo = mid; else hi = mid;
@@ -262,9 +266,13 @@ function genSiteFit(c: Ctx): Plan | null {
   if (!shape) return null;
   let polys = polygonsOf(shape);
   polys = [polys.sort((a, b) => ringArea(b[0]) - ringArea(a[0]))[0]];
-  let part = turf.polygon(polys[0]) as GeoJSON.Feature<GeoJSON.Polygon>;
+  if (polys[0].length > 1) return null; // 구멍(도로·남의 땅)이 있으면 바깥 고리만으로는 대지 밖을 덮게 되므로 다른 안으로 대신함
+  const original = turf.polygon(polys[0]) as GeoJSON.Feature<GeoJSON.Polygon>;
+  let part = original;
   try {
-    part = turf.simplify(part, { tolerance: 0.000008, highQuality: true }) as GeoJSON.Feature<GeoJSON.Polygon>;
+    const simple = turf.simplify(original, { tolerance: 0.000008, highQuality: true }) as GeoJSON.Feature<GeoJSON.Polygon>;
+    // 단순화하면 모서리가 이격 안쪽 영역 밖으로 나갈 수 있어, 안에 들어올 때만 씀
+    if (within(simple, c.inset)) part = simple;
   } catch {
     // 단순화하지 못하면 그대로 씀
   }
@@ -584,6 +592,8 @@ function scoreOption(kind: DesignKind, m: SiteMetrics, stats: { coverageUse: num
   return { score, why };
 }
 
+export const lastTimings: Record<string, number> = {};
+
 export function designOptions(detail: ReviewDetail, paramsIn: DesignParams, purpose: string): DesignSet {
   const { review, site, partShapes } = detail;
   const params: DesignParams = {
@@ -668,6 +678,7 @@ export function designOptions(detail: ReviewDetail, paramsIn: DesignParams, purp
 
   const designs: BuildingDesign[] = [];
   for (const kind of Object.keys(GENERATORS) as DesignKind[]) {
+    const tk = Date.now();
     const buildings: DesignedBuilding[] = [];
     const notes = [...commonNotes];
     for (const job of usable) {
@@ -685,6 +696,7 @@ export function designOptions(detail: ReviewDetail, paramsIn: DesignParams, purp
         else buildings.push(b);
       }
     }
+    lastTimings[kind] = Date.now() - tk;
     if (buildings.length === 0) continue;
 
     // 검증: 모든 덩어리가 대지 안에 있는가

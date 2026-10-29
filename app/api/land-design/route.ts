@@ -1,11 +1,11 @@
-import { designOptions } from "@/lib/design-engine";
+import { designOptions, lastTimings } from "@/lib/design-engine";
 import { reviewLandDetailed } from "@/lib/land-review";
 import { DEFAULT_COVERAGE, DEFAULT_FLOOR_HEIGHT, DEFAULT_SETBACK, PURPOSES, type DesignParams } from "@/lib/land-types";
 import { VWorldError } from "@/lib/vworld";
 
 export const maxDuration = 300;
 
-const MAX_PARCELS = 60;
+const MAX_PARCELS = 400;
 const detailCache = new Map<string, { at: number; promise: ReturnType<typeof reviewLandDetailed> }>();
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
@@ -40,8 +40,12 @@ export async function POST(request: Request) {
       detailPromise.catch(() => detailCache.delete(key));
       if (detailCache.size > 50) detailCache.delete(detailCache.keys().next().value as string);
     }
+    const t0 = Date.now();
     const detail = await detailPromise;
-    return Response.json({ set: designOptions(detail, params, purpose) });
+    const t1 = Date.now();
+    const set = designOptions(detail, params, purpose);
+    const t2 = Date.now();
+    return Response.json({ set }, { headers: { "Server-Timing": `review;dur=${t1 - t0}, engine;dur=${t2 - t1}, ${Object.entries(lastTimings).map(([k, v]) => `${k};dur=${v}`).join(", ")}` } });
   } catch (e) {
     console.error("land-design failed:", e instanceof Error ? e.message : e);
     const message = e instanceof VWorldError ? e.message : "건물을 배치하지 못했습니다 (확인 불가).";

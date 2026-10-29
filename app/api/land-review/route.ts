@@ -4,7 +4,7 @@ import { VWorldError } from "@/lib/vworld";
 // 처음 호출할 때 용도지역 도형을 받느라 수십 초 걸릴 수 있습니다
 export const maxDuration = 300;
 
-const MAX_PARCELS = 60;
+const MAX_PARCELS = 400;
 
 // POST /api/land-review  본문: { pnus: string[] }  (2단계 추천 결과에 묶인 필지의 PNU 목록)
 export async function POST(request: Request) {
