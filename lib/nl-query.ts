@@ -150,3 +150,84 @@ export const NL_EXAMPLES = [
   "남구랑 수영구 시유지 500평 넘는 땅",
   "학교용지도 포함해서 다시 찾아줘",
 ];
+
+// ── AI가 돌려준 값을 허용된 값으로만 걸러 조건에 반영 (모델이 만든 값은 믿지 않음) ──
+export type AiParse = {
+  whole_busan?: boolean | null;
+  gus?: string[] | null;
+  dongs?: { gu?: string | null; name: string }[] | null;
+  purpose?: string | null;
+  owners?: string[] | null;
+  min_area_m2?: number | null;
+  include_jimok?: string[] | null;
+  exclude_jimok?: string[] | null;
+  limit?: number | null;
+  clarify?: string | null;
+};
+
+export function applyAiParse(ai: AiParse, current: NlState): NlResult {
+  const next: NlState = { criteria: { ...current.criteria, ownerTypes: [...current.criteria.ownerTypes], excludedJimok: [...current.criteria.excludedJimok] }, gus: [...current.gus] };
+  const understood: string[] = [];
+  const questions: string[] = [];
+
+  if (ai.whole_busan) {
+    next.gus = BUSAN_GUS.map((g) => g.code);
+    next.criteria.dongs = [];
+    understood.push("지역: 부산 전체 (16개 구·군)");
+  } else {
+    const gus = (Array.isArray(ai.gus) ? ai.gus : []).map((n) => BUSAN_GUS.find((g) => g.name === n)).filter((g): g is { code: string; name: string } => !!g);
+    const dongs: typeof BUSAN_DONGS = [];
+    for (const d of Array.isArray(ai.dongs) ? ai.dongs : []) {
+      if (!d || typeof d.name !== "string") continue;
+      const list = BUSAN_DONGS.filter((x) => x.name === d.name && (!d.gu || x.guName === d.gu));
+      if (list.length === 1) dongs.push(list[0]);
+      else if (list.length > 1) questions.push(`'${d.name}'은(는) ${list.map((x) => x.guName).join(", ")}에 있어요. 어느 구인지 알려 주세요.`);
+    }
+    if (dongs.length > 0) {
+      next.criteria.dongs = dongs.map((d) => d.code);
+      next.gus = [];
+      understood.push(`지역: ${dongs.map((d) => `${d.guName} ${d.name}`).join(", ")}`);
+    } else if (gus.length > 0) {
+      next.gus = gus.map((g) => g.code);
+      next.criteria.dongs = [];
+      understood.push(`지역: ${gus.map((g) => g.name).join(", ")}`);
+    }
+  }
+
+  if (ai.purpose === "청사" || ai.purpose === "공공주택" || ai.purpose === "기타") {
+    next.criteria.purpose = ai.purpose;
+    understood.push(`용도: ${ai.purpose}`);
+  }
+
+  const ownerMap: Record<string, string> = { 국유지: "국유지", 시유지: "시 도유지", 구군유지: "군유지" };
+  const owners = [...new Set((Array.isArray(ai.owners) ? ai.owners : []).map((o) => ownerMap[o]).filter(Boolean))];
+  if (owners.length > 0) {
+    next.criteria.ownerTypes = ALL_OWNERS.filter((o) => owners.includes(o));
+    understood.push(`소유: ${next.criteria.ownerTypes.map(ownerLabel).join("·")}`);
+  }
+
+  if (typeof ai.min_area_m2 === "number" && Number.isFinite(ai.min_area_m2) && ai.min_area_m2 >= 0 && ai.min_area_m2 <= 10_000_000) {
+    next.criteria.minArea = Math.round(ai.min_area_m2);
+    understood.push(`최소 면적: ${next.criteria.minArea.toLocaleString("ko-KR")}㎡`);
+  }
+  for (const j of Array.isArray(ai.include_jimok) ? ai.include_jimok : []) {
+    if (!ALL_JIMOK.includes(j)) continue;
+    next.criteria.excludedJimok = next.criteria.excludedJimok.filter((x) => x !== j);
+    understood.push(`지목 ${j} 포함`);
+  }
+  for (const j of Array.isArray(ai.exclude_jimok) ? ai.exclude_jimok : []) {
+    if (!ALL_JIMOK.includes(j)) continue;
+    if (!next.criteria.excludedJimok.includes(j)) next.criteria.excludedJimok.push(j);
+    understood.push(`지목 ${j} 제외`);
+  }
+  if (typeof ai.limit === "number" && Number.isFinite(ai.limit)) {
+    next.criteria.limit = Math.min(300, Math.max(10, Math.round(ai.limit)));
+    understood.push(`결과 개수: ${next.criteria.limit}곳`);
+  }
+
+  if (typeof ai.clarify === "string" && ai.clarify) questions.push(ai.clarify.slice(0, 120));
+  if (understood.length === 0 && questions.length === 0) questions.push("조건을 알아듣지 못했어요. 지역·용도·소유·면적을 말해 주세요.");
+  const hasRegion = next.gus.length > 0 || next.criteria.dongs.length > 0;
+  if (!hasRegion) questions.push("어느 지역을 볼까요? (예: 수영구, 해운대구, 부산 전체)");
+  return { state: next, understood, questions, canSearch: understood.length > 0 && hasRegion && next.criteria.ownerTypes.length > 0 };
+}

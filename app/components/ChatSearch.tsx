@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { NL_EXAMPLES, parseQuery, type NlState } from "@/lib/nl-query";
+import { NL_EXAMPLES, applyAiParse, parseQuery, type NlResult, type NlState } from "@/lib/nl-query";
 
 type Msg = { role: "user" | "bot"; text: string; lines?: string[]; questions?: string[] };
 
@@ -27,15 +27,33 @@ export default function ChatSearch({
     endRef.current?.scrollIntoView({ block: "nearest" });
   }, [messages]);
 
-  function send(raw: string) {
+  const [thinking, setThinking] = useState(false);
+
+  // 규칙으로 못 알아들은 문장만 AI에게 물음 (실패하면 규칙 해석의 안내를 그대로 보여 줌)
+  async function send(raw: string) {
     const q = raw.trim();
-    if (!q || busy) return;
-    const r = parseQuery(q, state);
-    const reply: Msg = r.canSearch
-      ? { role: "bot", text: "이렇게 이해했어요. 바로 찾아볼게요.", lines: r.understood, questions: r.questions }
-      : { role: "bot", text: r.understood.length ? "일부만 알아들었어요." : "다시 말씀해 주세요.", lines: r.understood, questions: r.questions };
-    setMessages((m) => [...m, { role: "user", text: q }, reply]);
+    if (!q || busy || thinking) return;
+    let r: NlResult = parseQuery(q, state);
+    let byAi = false;
+    setMessages((m) => [...m, { role: "user", text: q }]);
     setText("");
+    if (r.understood.length === 0) {
+      setThinking(true);
+      try {
+        const res = await fetch("/api/nl-parse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: q }) });
+        if (res.ok) {
+          const data = await res.json();
+          r = applyAiParse(data.ai ?? {}, state);
+          byAi = true;
+        }
+      } catch {
+        // 연결하지 못하면 규칙 해석의 안내를 그대로 보여 줌
+      } finally {
+        setThinking(false);
+      }
+    }
+    const head = r.canSearch ? "이렇게 이해했어요. 바로 찾아볼게요." : r.understood.length ? "일부만 알아들었어요." : "다시 말씀해 주세요.";
+    setMessages((m) => [...m, { role: "bot", text: byAi ? `${head} (AI가 풀어 읽었어요)` : head, lines: r.understood, questions: r.questions }]);
     if (r.understood.length > 0) onApply(r.state, r.canSearch);
   }
 
@@ -87,8 +105,8 @@ export default function ChatSearch({
           className="min-w-0 flex-1 rounded border border-zinc-300 px-2 py-1.5 text-sm"
           aria-label="찾고 싶은 땅을 말로 입력"
         />
-        <button type="submit" disabled={busy || !text.trim()} className="rounded bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-          보내기
+        <button type="submit" disabled={busy || thinking || !text.trim()} className="rounded bg-blue-600 px-3 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+          {thinking ? "해석 중…" : "보내기"}
         </button>
       </form>
     </section>
