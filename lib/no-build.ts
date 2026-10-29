@@ -20,6 +20,7 @@ const RULES: Rule[] = [
 
   // ── 확인 필요 (허가·협의·심의) ──
   { test: /^농업보호구역$/, level: "caution", reason: "농업보호구역: 농업진흥구역을 보호하는 구역으로 건축 가능한 시설이 제한돼요 (농지법 제34조)" },
+  { test: /(건축허가\s*제한|착공\s*제한)/, level: "caution", reason: "건축허가·착공이 제한되는 지역이에요 (건축법 제18조: 최대 2년, 1회 1년 연장)" },
   { test: /^개발행위허가제한지역$/, level: "caution", reason: "개발행위허가 제한 기간 중에는 건축 허가가 제한될 수 있어요 (국토계획법 제63조)" },
   { test: /^산지전용·일시사용제한지역$/, level: "caution", reason: "산지전용·일시사용이 제한되는 지역이라 산지 안 건축이 어려울 수 있어요 (산지관리법)" },
   { test: /(하천구역|소하천구역)/, level: "caution", reason: "하천구역: 점용허가 등 하천 관리청 협의가 필요해요 (하천법)" },
@@ -69,4 +70,26 @@ export function classifyParcels(parcels: { area: number; rows: { name: string; r
       .sort((a, b) => (b.areaShare ?? 0) - (a.areaShare ?? 0));
   };
   return { blocking: agg("blocking"), caution: agg("caution") };
+}
+
+// ── 도로에 접해야 하는 요건 (건축법 제44조 + 시행령 제28조②) ──
+// 건축물의 대지는 2m 이상 도로에 접해야 하고, 연면적 2,000㎡ 이상이면 너비 6m 이상 도로에 4m 이상 접해야 합니다.
+// VWorld 토지이용계획에는 도시·군계획도로(폭 구분 포함)와 "접함" 정보만 있고, 현황도로(도시계획에 없는 실제 길)는 없어서
+// 이 정보가 없다고 해서 맹지라고 단정하지 않고 "확인 필요"로만 알립니다.
+const ROAD_CLASS = /^(광로|대로|중로|소로)([0-9])류(?:\(폭\s*([0-9]+)m?(?:\s*[~-]\s*([0-9]+)m)?\s*(미만)?\))?/;
+
+export function roadAccessCheck(rows: { name: string; relation: string }[]): string | null {
+  const touching = rows.filter((r) => r.relation === "접함" && (ROAD_CLASS.test(r.name) || /^(일반도로|도로)$/.test(r.name)));
+  const wide = touching.some((r) => {
+    const m = ROAD_CLASS.exec(r.name);
+    if (!m) return false;
+    if (m[1] !== "소로") return true; // 광로·대로·중로는 너비 12m 이상
+    return !m[5] && Number(m[3]) >= 6; // 소로 중 폭이 6m 이상으로 적힌 것(소로1·2류)
+  });
+  if (wide) return null;
+  const base = "건축법 제44조·시행령 제28조②: 연면적 2,000㎡ 이상 건축물의 대지는 너비 6m 이상 도로에 4m 이상 접해야 합니다";
+  if (touching.length > 0) {
+    return `접한 도로(${[...new Set(touching.map((r) => r.name))].join(", ")})의 너비가 6m 이상인지 확인 필요. ${base}`;
+  }
+  return `도시·군계획도로에 접한다는 정보가 없음 (맹지이거나 현황도로에만 접할 수 있음): 접도 여부 확인 필요. ${base}`;
 }

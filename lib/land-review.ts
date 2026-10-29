@@ -3,7 +3,7 @@
 
 import * as turf from "@turf/turf";
 import { getLandUse, VWorldError, type LandUseRow } from "./vworld";
-import { classifyParcels } from "./no-build";
+import { classifyParcels, roadAccessCheck } from "./no-build";
 import type { NoBuildHit } from "./land-types";
 import { NON_URBAN_NOT_ALLOWED } from "./non-urban-rules";
 import { loadDong, loadZoningFile, type ZoningRecord } from "./busan-data";
@@ -269,6 +269,10 @@ export async function reviewLandDetailed(pnus: string[], options: { skipLandUse?
     landUse.push({ name: row.name, relation: row.relation });
   }
   const applies = landUse.filter((l) => l.relation === "포함" || l.relation === "저촉");
+  if (!options.skipLandUse) {
+    const roadMsg = roadAccessCheck(landUseLists.flat());
+    if (roadMsg) checks.push(roadMsg);
+  }
   const used = new Set<string>();
   for (const l of applies) {
     const rule = OVERRIDE_KEYWORDS.find((k) => l.name.includes(k.keyword));
