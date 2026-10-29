@@ -4,6 +4,8 @@
 import * as turf from "@turf/turf";
 import { getLandUse, VWorldError, type LandUseRow } from "./vworld";
 import { classifyParcels } from "./no-build";
+import type { NoBuildHit } from "./land-types";
+import { NON_URBAN_NOT_ALLOWED } from "./non-urban-rules";
 import { loadDong, loadZoningFile, type ZoningRecord } from "./busan-data";
 import { isBusanPnu } from "./regions";
 import { type LandReview, type ZonePart } from "./land-types";
@@ -29,6 +31,10 @@ export async function loadLandUse(pnu: string): Promise<LandUseRow[]> {
   const rows = await getLandUse(pnu);
   landUseCache.set(pnu, { at: Date.now(), rows });
   return rows;
+}
+
+function mergeNoBuild(base: { blocking: NoBuildHit[]; caution: NoBuildHit[] }, extra: NoBuildHit[]) {
+  return { blocking: [...extra, ...base.blocking], caution: base.caution };
 }
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -156,6 +162,7 @@ export async function reviewLandDetailed(pnus: string[], options: { skipLandUse?
   let unknownArea = 0;
   let sliverArea = 0;
   const sliverNames: string[] = [];
+  const nonUrbanBlocking: NoBuildHit[] = [];
   for (const z of zones) {
     const exclusive = z.area - (overlapOf.get(z.name) ?? 0);
     if (exclusive < tol) {
@@ -168,6 +175,8 @@ export async function reviewLandDetailed(pnus: string[], options: { skipLandUse?
     const rule = ZONE_RULES[z.name];
     if (!rule) {
       unknownArea += exclusive;
+      const banned = NON_URBAN_NOT_ALLOWED["청사"]?.[z.name] && NON_URBAN_NOT_ALLOWED["공공주택"]?.[z.name] ? NON_URBAN_NOT_ALLOWED["청사"][z.name] : null;
+      if (banned) nonUrbanBlocking.push({ name: z.name, relation: "포함", reason: `${banned.summary} (${banned.ref})`, areaShare: Math.round(share * 100) / 100 });
       unknownReasons.push(`${z.name}은 조례 규칙표에 없음 (약 ${fmt(area)}㎡): 확인 필요`);
       continue;
     }
@@ -318,9 +327,12 @@ export async function reviewLandDetailed(pnus: string[], options: { skipLandUse?
           },
     multiZone,
     landUse,
-    noBuild: classifyParcels(
-      pnus.map((pnu, i) => ({ area: dongs[pnu.slice(0, 8)].parcels[pnu].area, rows: landUseLists[i] ?? [] })),
-      siteArea,
+    noBuild: mergeNoBuild(
+      classifyParcels(
+        pnus.map((pnu, i) => ({ area: dongs[pnu.slice(0, 8)].parcels[pnu].area, rows: landUseLists[i] ?? [] })),
+        siteArea,
+      ),
+      nonUrbanBlocking,
     ),
     checks,
     relaxations: RELAXATION_NOTES,

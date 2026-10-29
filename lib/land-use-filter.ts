@@ -9,6 +9,7 @@ import { loadParcelZones, type ParcelZones } from "./busan-data";
 import { materializeGroup, type Candidates, type RawGroup } from "./land-search";
 import { loadLandUse, reviewLandDetailed } from "./land-review";
 import { classifyLandUse } from "./no-build";
+import { NON_URBAN_NOT_ALLOWED } from "./non-urban-rules";
 import { DEFAULT_RESULT_LIMIT, type LandGroup, type SearchCriteria, type SearchResult } from "./land-types";
 import { GREENBELT_LIMIT, UNSUPPORTED_LIMIT, USE_PURPOSES, USE_STATUS_LABEL, assessUse, type UseReviewInput } from "./use-rules";
 import { SMALL_PART_LIMIT_M2, ZONE_RULES } from "./zoning-rules";
@@ -40,6 +41,12 @@ function approximate(g: RawGroup, pz: ParcelZones, purpose: string): Verdict {
     for (const [name, share] of rec.z) zoneArea.set(name, (zoneArea.get(name) ?? 0) + share * p.area);
   }
   if (total <= 0) return { keep: true, reason: null, use: null };
+
+  // 관리·농림지역 등 도시지역 밖 용도지역 중 법령(시행령 별표 18~22)상 이 용도로 지을 수 없는 곳이 절반 이상이면 법령상 불가
+  const banned = NON_URBAN_NOT_ALLOWED[purpose] ?? {};
+  let bannedArea = 0;
+  for (const [name, area] of zoneArea) if (banned[name]) bannedArea += area;
+  if (bannedArea / total >= 0.5) return { keep: false, reason: "use", use: null };
 
   let known = 0;
   let unsupported = 0;
