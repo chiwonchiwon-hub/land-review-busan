@@ -440,7 +440,7 @@ function layout(vols: VolArea[], mode: FloorsMode, N: number): Pick<DesignVolume
   return [{ startFloor: 0, floors: f1 }, { startFloor: f1, floors: f2 }, { startFloor: f1 + f2, floors: f3 }];
 }
 
-type Job = { zone: string | null; shape: Poly; maxB: number; maxF: number; limit?: UseLimit };
+type Job = { zone: string | null; shape: Poly; maxB: number; maxF: number; limit?: UseLimit; ruleZone?: string | null };
 
 function chooseFloors(
   buildings: VolArea[][],
@@ -555,20 +555,39 @@ function buildComplex(kind: "barComplex" | "towerComplex", job: Job, base: { pro
   const dims: CxDim[] = kind === "barComplex" ? [{ w: 62, d: 13 }, { w: 50, d: 13 }, { w: 38, d: 13 }] : [{ w: 27, d: 27 }, { w: 23, d: 23 }];
   const floorOptions = params.floors ? [params.floors] : [2, 3, 4, 5, 6, 8, 10, 12, 15, 18, 20, 25, 30, 35, 40];
 
-  let best: { rings: XY[][]; N: number; gap: number; floorArea: number } | null = null;
+  // 공동주택 일조·채광 기준 (건축법 제61조②, 시행령 제86조③, 부산광역시 건축 조례 제43조)
+  //  - 일반·중심상업지역은 적용 제외
+  //  - 인접 대지경계선까지 거리 ≥ 높이의 1/2 (근린상업·준주거지역은 1/4)  [시행령 제86조③1호: 높이 ≤ 거리의 2배(4배)]
+  //  - 같은 대지에서 마주보는 동 사이 거리 ≥ 높이의 1배  [조례 제43조③: 시행령 제86조③2호가목의 '조례로 정하는 거리']
+  //  - 측벽과 측벽이 마주보는 경우 4m 이상 (시행령 제86조③2호마목)
+  const ruleZone = job.ruleZone ?? job.zone ?? null;
+  const exempt = ruleZone === "일반상업지역" || ruleZone === "중심상업지역";
+  const edgeFactor = exempt ? 0 : ruleZone === "준주거지역" || ruleZone === "근린상업지역" ? 0.25 : 0.5;
+  const regionCache = new Map<number, Poly | undefined>();
+  const regionFor = (edge: number): Poly | undefined => {
+    const key = Math.round(edge * 2) / 2;
+    if (key <= margin + 0.01) return inset;
+    if (!regionCache.has(key)) regionCache.set(key, turf.buffer(job.shape, -key, { units: "meters" }) as Poly | undefined);
+    return regionCache.get(key);
+  };
+
+  let best: { rings: XY[][]; N: number; gap: number; edge: number; floorArea: number } | null = null;
   for (const N of floorOptions) {
     if (N > floorsCap) continue;
     const H = N * params.floorHeight;
+    const edge = Math.max(margin, H * edgeFactor);
+    const region = regionFor(edge);
+    if (!region || turf.area(region) < 800) continue;
     for (const dim of dims) {
       if (H > SLENDER * Math.min(dim.w, dim.d) + 1e-6) continue;
-      const gap = clamp(0.5 * H, 15, 40); // 동 사이 거리 가정: 높이의 절반, 최소 15m
-      const gapEW = kind === "barComplex" ? clamp(0.3 * H, 10, 25) : gap;
+      const gap = exempt ? clamp(0.3 * H, 10, 30) : H; // 마주보는 동 사이 거리: 높이의 1배
+      const gapEW = kind === "barComplex" ? 8 : gap; // 판상형의 짧은 쪽(측벽) 사이: 법정 4m 이상, 여유 있게 8m
       const maxFp = Math.min(targetB, (maxF * SAFETY) / N);
       if (maxFp < dim.w * dim.d) continue;
-      const pk = packComplex(inset, proj, dim, gap, gapEW, maxFp);
+      const pk = packComplex(region, proj, dim, gap, gapEW, maxFp);
       if (!pk) continue;
       const fa = pk.footprint * N;
-      if (!best || fa > best.floorArea * 1.005) best = { rings: pk.rings, N, gap, floorArea: fa };
+      if (!best || fa > best.floorArea * 1.005) best = { rings: pk.rings, N, gap, edge, floorArea: fa };
     }
   }
   if (!best) return null;
@@ -590,7 +609,11 @@ function buildComplex(kind: "barComplex" | "towerComplex", job: Job, base: { pro
   const footprintArea = floor2(volumes.reduce((s, v) => s + v.area, 0));
   const floorArea = floor2(footprintArea * best.N);
   const notes = [
-    `동 ${volumes.length}개 × ${best.N}층, 동 사이 거리 ${Math.round(best.gap)}m (가정: 높이의 0.5배, 최소 15m). 일조·채광 사선과 법정 동간 거리는 단지 계획 단계에서 따로 검토해야 합니다.`,
+    `동 ${volumes.length}개 × ${best.N}층 (높이 ${Math.round(best.N * params.floorHeight)}m).`,
+    exempt
+      ? `${ruleZone}은 공동주택 채광 높이 기준이 적용되지 않아 동 사이 거리는 높이의 0.3배(10~30m)로 가정했습니다 (건축법 제61조②).`
+      : `동 사이 거리 ${Math.round(best.gap)}m = 높이의 1배 (부산광역시 건축 조례 제43조③, 건축법 시행령 제86조③2호), 인접 대지경계선과 ${Math.round(best.edge)}m 이상 띄움 = 높이의 ${edgeFactor === 0.25 ? "1/4" : "1/2"} (시행령 제86조③1호).`,
+    "도로·공원에 접한 쪽의 경계 완화, 동지 기준 2시간 일조 확보로 거리를 줄이는 방법, 부대·복리시설, 정북 방향 일조 사선의 세부 검토는 반영하지 않았습니다.",
   ];
   if (floorCapArea !== undefined && floorCapArea < job.maxF) notes.push(`${job.limit!.floorAreaLt!.toLocaleString("ko-KR")}㎡ 미만 규정에 따라 연면적을 ${floorCapArea.toLocaleString("ko-KR")}㎡ 이내로 줄였습니다`);
   if (job.limit?.maxFloors !== undefined && best.N >= job.limit.maxFloors) notes.push(`용도 규정에 따라 ${job.limit.maxFloors}층 이하로 제한했습니다`);
@@ -819,7 +842,7 @@ export function designOptions(detail: ReviewDetail, paramsIn: DesignParams, purp
           const shape = partShapes.get(p.zone);
           return shape ? [{ zone: p.zone, shape, maxB: p.maxBuildingArea, maxF: p.maxFloorArea }] : [];
         })
-  ).map((j) => ({ ...j, limit: limits.find((l) => l.zone === j.zone) ?? limits[0] }));
+  ).map((j) => ({ ...j, limit: limits.find((l) => l.zone === j.zone) ?? limits[0], ruleZone: j.zone ?? review.parts[0]?.zone ?? null }));
 
   const margin = Math.max(params.setback, MIN_MARGIN);
   const commonNotes = [...baseNotes];
