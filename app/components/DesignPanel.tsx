@@ -256,6 +256,26 @@ export default function DesignPanel({
                 ))}
               </ul>
               )}
+              {b.complexPlan && (
+                <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 rounded bg-zinc-50 p-2" data-complex-plan>
+                  <dt className="text-zinc-600">추정 세대수 (가정)</dt>
+                  <dd className="text-right">{fmt(b.complexPlan.households)}세대</dd>
+                  <dt className="text-zinc-600">법정 주차대수</dt>
+                  <dd className="text-right">{fmt(b.complexPlan.parkingSpaces)}대</dd>
+                  <dt className="text-zinc-600">지하주차장</dt>
+                  <dd className="text-right">
+                    {fmt(b.complexPlan.undergroundParkingArea)}㎡ · 지하 {b.complexPlan.undergroundFloors}층
+                  </dd>
+                  <dt className="text-zinc-600">주민공동시설</dt>
+                  <dd className="text-right">{b.complexPlan.communityFacilityArea > 0 ? `${fmt(b.complexPlan.communityFacilityArea)}㎡ 이상` : "의무 없음"}</dd>
+                  <dt className="text-zinc-600">조경</dt>
+                  <dd className="text-right">{b.complexPlan.landscapeRequired > 0 ? `${fmt(b.complexPlan.landscapeRequired)}㎡ 이상` : "의무 없음"}</dd>
+                  <dt className="text-zinc-600">외부 공간</dt>
+                  <dd className={`text-right ${b.complexPlan.openSpaceEnough ? "" : "text-amber-700"}`}>
+                    {fmt(b.complexPlan.openSpace)}㎡ {b.complexPlan.openSpaceEnough ? "(충분)" : "(부족할 수 있음)"}
+                  </dd>
+                </dl>
+              )}
               <div className="mt-1 text-zinc-600">
                 건축면적 {fmt(b.footprintArea)}㎡ · 연면적 {fmt(b.floorArea)}㎡ · 높이 {fmt(b.height)}m
               </div>

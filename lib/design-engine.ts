@@ -17,6 +17,7 @@ import {
   type XY,
 } from "./land-types";
 import { assessUse, capBelow, limitsFor, type UseLimit } from "./use-rules";
+import { ASSUMED, COMPLEX_OPEN_SPACE_CAP, planComplex } from "./complex-plan";
 
 type Poly = GeoJSON.Feature<GeoJSON.Polygon | GeoJSON.MultiPolygon>;
 
@@ -551,7 +552,8 @@ function buildComplex(kind: "barComplex" | "towerComplex", job: Job, base: { pro
   const floorCapArea = job.limit?.floorAreaLt !== undefined ? capBelow(job.limit.floorAreaLt) : undefined;
   const maxF = floorCapArea !== undefined ? Math.min(job.maxF, floorCapArea) : job.maxF;
   const floorsCap = Math.min(MAX_FLOORS, job.limit?.maxFloors ?? MAX_FLOORS);
-  const targetB = job.maxB * clamp(params.coverage, 0.3, 1) * SAFETY;
+  const siteArea = turf.area(job.shape);
+  const targetB = Math.min(job.maxB * clamp(params.coverage, 0.3, 1), siteArea * COMPLEX_OPEN_SPACE_CAP) * SAFETY;
   const dims: CxDim[] = kind === "barComplex" ? [{ w: 62, d: 13 }, { w: 50, d: 13 }, { w: 38, d: 13 }] : [{ w: 27, d: 27 }, { w: 23, d: 23 }];
   const floorOptions = params.floors ? [params.floors] : [2, 3, 4, 5, 6, 8, 10, 12, 15, 18, 20, 25, 30, 35, 40];
 
@@ -580,7 +582,7 @@ function buildComplex(kind: "barComplex" | "towerComplex", job: Job, base: { pro
     if (!region || turf.area(region) < 800) continue;
     for (const dim of dims) {
       if (H > SLENDER * Math.min(dim.w, dim.d) + 1e-6) continue;
-      const gap = exempt ? clamp(0.3 * H, 10, 30) : H; // 마주보는 동 사이 거리: 높이의 1배
+      const gap = exempt ? clamp(0.3 * H, 10, 30) : Math.max(H, ASSUMED.roadWidth); // 마주보는 동 사이 거리: 높이의 1배(단지 안 도로 폭 7m 이상도 확보)
       const gapEW = kind === "barComplex" ? 8 : gap; // 판상형의 짧은 쪽(측벽) 사이: 법정 4m 이상, 여유 있게 8m
       const maxFp = Math.min(targetB, (maxF * SAFETY) / N);
       if (maxFp < dim.w * dim.d) continue;
@@ -608,11 +610,28 @@ function buildComplex(kind: "barComplex" | "towerComplex", job: Job, base: { pro
   }));
   const footprintArea = floor2(volumes.reduce((s, v) => s + v.area, 0));
   const floorArea = floor2(footprintArea * best.N);
+  const plan = planComplex({
+    floorArea,
+    footprintArea,
+    siteArea,
+    insetArea: turf.area(inset),
+    buildingSides: volumes.map((v) => {
+      const xs = v.ring.map((p) => p[0]), ys = v.ring.map((p) => p[1]);
+      return Math.max(Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys));
+    }),
+    ruleZone,
+  });
   const notes = [
     `동 ${volumes.length}개 × ${best.N}층 (높이 ${Math.round(best.N * params.floorHeight)}m).`,
     exempt
       ? `${ruleZone}은 공동주택 채광 높이 기준이 적용되지 않아 동 사이 거리는 높이의 0.3배(10~30m)로 가정했습니다 (건축법 제61조②).`
       : `동 사이 거리 ${Math.round(best.gap)}m = 높이의 1배 (부산광역시 건축 조례 제43조③, 건축법 시행령 제86조③2호), 인접 대지경계선과 ${Math.round(best.edge)}m 이상 띄움 = 높이의 ${edgeFactor === 0.25 ? "1/4" : "1/2"} (시행령 제86조③1호).`,
+    `용적률 산정에서는 지하층과 부속 주차용 면적이 빠집니다(건축법 시행령 제119조제1항제4호). 주차는 지하에 둔다고 보고 지상층만 연면적에 넣었습니다.`,
+    `추정 ${plan.households.toLocaleString("ko-KR")}세대(전용 ${ASSUMED.avgExclusive}㎡ 가정): 법정 주차 ${plan.parkingSpaces.toLocaleString("ko-KR")}대(주택건설기준 규정 제27조) → 지하주차장 약 ${plan.undergroundParkingArea.toLocaleString("ko-KR")}㎡ = 지하 ${plan.undergroundFloors}층 필요`,
+    plan.communityFacilityArea > 0 ? `주민공동시설 ${plan.communityFacilityArea.toLocaleString("ko-KR")}㎡ 이상 필요 (제55조의2)` : "100세대 미만이라 주민공동시설 설치 의무가 없습니다 (제55조의2)",
+    plan.landscapeRequired > 0 ? `조경 ${plan.landscapeRequired.toLocaleString("ko-KR")}㎡ 이상 (부산광역시 건축 조례 제25조)` : "녹지지역이라 조경 설치 의무가 없습니다 (건축법 시행령 제27조)",
+    plan.openSpaceEnough ? "건축면적을 뺀 외부 공간이 조경과 단지 안 도로(폭 7m 이상, 제26조)를 담기에 충분합니다." : "건축면적을 뺀 외부 공간이 조경과 단지 안 도로를 담기에 부족할 수 있어 동 수나 건축면적 사용률을 줄여야 할 수 있습니다.",
+    plan.undergroundFloors > 4 ? "지하주차장이 지하 4층을 넘어 현실적이지 않을 수 있어 세대수·주차 방식 조정이 필요합니다." : "",
     "도로·공원에 접한 쪽의 경계 완화, 동지 기준 2시간 일조 확보로 거리를 줄이는 방법, 부대·복리시설, 정북 방향 일조 사선의 세부 검토는 반영하지 않았습니다.",
   ];
   if (floorCapArea !== undefined && floorCapArea < job.maxF) notes.push(`${job.limit!.floorAreaLt!.toLocaleString("ko-KR")}㎡ 미만 규정에 따라 연면적을 ${floorCapArea.toLocaleString("ko-KR")}㎡ 이내로 줄였습니다`);
@@ -628,7 +647,8 @@ function buildComplex(kind: "barComplex" | "towerComplex", job: Job, base: { pro
       floorArea,
       maxBuildingArea: job.maxB,
       maxFloorArea: maxF,
-      notes,
+      notes: notes.filter(Boolean),
+      complexPlan: plan,
     },
   ];
 }

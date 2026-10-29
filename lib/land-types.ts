@@ -134,6 +134,20 @@ export type DesignVolume = {
   role: "main" | "base" | "tower" | "wing" | "tier";
 };
 
+// 아파트 단지의 법정 부대시설 규모 (lib/complex-plan.ts)
+export type ComplexPlan = {
+  households: number; // 추정 세대수
+  exclusiveArea: number; // 전용면적 합계(㎡)
+  parkingSpaces: number; // 법정 최소 주차대수
+  undergroundParkingArea: number; // 필요한 지하주차장 면적(㎡)
+  undergroundFloors: number; // 필요한 지하층 수
+  communityFacilityArea: number; // 주민공동시설 최소 면적(㎡)
+  landscapeRequired: number; // 조경 면적(㎡)
+  roadAreaEstimate: number; // 단지 안 도로 면적 어림(㎡)
+  openSpace: number; // 건축면적을 뺀 외부 공간(㎡)
+  openSpaceEnough: boolean; // 외부 공간이 조경 + 도로를 담기에 충분한지
+};
+
 export type DesignedBuilding = {
   zone: string | null; // 부분별로 배치한 경우 그 용도지역
   volumes: DesignVolume[];
@@ -144,6 +158,7 @@ export type DesignedBuilding = {
   maxBuildingArea: number; // 이 건물에 적용한 한도
   maxFloorArea: number;
   notes: string[];
+  complexPlan?: ComplexPlan; // 공공주택 단지안에만 있음
 };
 
 // 대지 모양을 분석한 값 (안을 추천하는 근거)
