@@ -158,7 +158,7 @@ export type AiParse = {
   dongs?: { gu?: string | null; name: string }[] | null;
   purpose?: string | null;
   owners?: string[] | null;
-  min_area_m2?: number | null;
+  min_area?: { value: number; unit: string } | null;
   include_jimok?: string[] | null;
   exclude_jimok?: string[] | null;
   limit?: number | null;
@@ -206,8 +206,10 @@ export function applyAiParse(ai: AiParse, current: NlState): NlResult {
     understood.push(`소유: ${next.criteria.ownerTypes.map(ownerLabel).join("·")}`);
   }
 
-  if (typeof ai.min_area_m2 === "number" && Number.isFinite(ai.min_area_m2) && ai.min_area_m2 >= 0 && ai.min_area_m2 <= 10_000_000) {
-    next.criteria.minArea = Math.round(ai.min_area_m2);
+  const ma = ai.min_area;
+  const m2 = ma && typeof ma.value === "number" ? ma.value * (ma.unit === "평" ? PYEONG : 1) : NaN; // 환산은 AI가 아니라 코드가 함
+  if (Number.isFinite(m2) && m2 >= 0 && m2 <= 10_000_000) {
+    next.criteria.minArea = Math.round(m2);
     understood.push(`최소 면적: ${next.criteria.minArea.toLocaleString("ko-KR")}㎡`);
   }
   for (const j of Array.isArray(ai.include_jimok) ? ai.include_jimok : []) {
@@ -230,4 +232,14 @@ export function applyAiParse(ai: AiParse, current: NlState): NlResult {
   const hasRegion = next.gus.length > 0 || next.criteria.dongs.length > 0;
   if (!hasRegion) questions.push("어느 지역을 볼까요? (예: 수영구, 해운대구, 부산 전체)");
   return { state: next, understood, questions, canSearch: understood.length > 0 && hasRegion && next.criteria.ownerTypes.length > 0 };
+}
+
+// 규칙이 일부만 읽고 놓친 조건이 있어 보이면 true (면적·소유 관련 말이 있는데 그 조건을 못 뽑은 경우)
+export function looksIncomplete(text: string, understood: string[]): boolean {
+  if (understood.length === 0) return true;
+  const hasArea = /[평㎡]|제곱|천s*평|만s*평|넓은|큰s*땅|이상/.test(text);
+  const hasOwner = /국유|시유|구유|군유|공유|구청|시청|국가|지자체|가진|소유/.test(text);
+  const gotArea = understood.some((u) => u.startsWith("최소 면적"));
+  const gotOwner = understood.some((u) => u.startsWith("소유"));
+  return (hasArea && !gotArea) || (hasOwner && !gotOwner);
 }

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { NL_EXAMPLES, applyAiParse, parseQuery, type NlResult, type NlState } from "@/lib/nl-query";
+import { NL_EXAMPLES, applyAiParse, looksIncomplete, parseQuery, type NlResult, type NlState } from "@/lib/nl-query";
 
 type Msg = { role: "user" | "bot"; text: string; lines?: string[]; questions?: string[] };
 
@@ -37,13 +37,16 @@ export default function ChatSearch({
     let byAi = false;
     setMessages((m) => [...m, { role: "user", text: q }]);
     setText("");
-    if (r.understood.length === 0) {
+    if (looksIncomplete(q, r.understood)) {
       setThinking(true);
       try {
         const res = await fetch("/api/nl-parse", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: q }) });
         if (res.ok) {
           const data = await res.json();
-          r = applyAiParse(data.ai ?? {}, state);
+          // 규칙이 읽은 것 위에 AI가 읽은 것을 얹음 (둘 다 살림)
+          const ai = applyAiParse(data.ai ?? {}, r.state);
+          const merged = [...r.understood.filter((u) => !ai.understood.some((v) => v.split(":")[0] === u.split(":")[0])), ...ai.understood];
+          r = { ...ai, understood: merged };
           byAi = true;
         }
       } catch {
@@ -58,9 +61,9 @@ export default function ChatSearch({
   }
 
   return (
-    <section className="border-b border-zinc-200 bg-zinc-50 p-4" aria-label="말로 조건 입력">
-      <h2 className="mb-2 text-base font-semibold">말로 찾기</h2>
-      <div className="max-h-52 space-y-2 overflow-y-auto pr-1 text-xs" data-chat-log>
+    <section className="border-b border-zinc-200 bg-zinc-50 px-4 py-3" aria-label="말로 조건 입력">
+      <h2 className="mb-2 text-sm font-semibold">말로 찾기</h2>
+      <div className="max-h-40 space-y-2 overflow-y-auto pr-1 text-xs" data-chat-log>
         {messages.map((m, i) => (
           <div key={i} className={m.role === "user" ? "flex justify-end" : "flex"}>
             <div className={`max-w-[92%] rounded-lg px-2.5 py-1.5 ${m.role === "user" ? "bg-blue-600 text-white" : "border border-zinc-200 bg-white text-zinc-800"}`}>
@@ -84,13 +87,15 @@ export default function ChatSearch({
         ))}
         <div ref={endRef} />
       </div>
+      {messages.length <= 1 && (
       <div className="mt-2 flex flex-wrap gap-1">
-        {NL_EXAMPLES.map((ex) => (
+        {NL_EXAMPLES.slice(0, 3).map((ex) => (
           <button key={ex} type="button" disabled={busy} onClick={() => send(ex)} className="rounded-full border border-zinc-300 bg-white px-2 py-0.5 text-[11px] text-zinc-600 hover:bg-zinc-100 disabled:opacity-50">
             {ex}
           </button>
         ))}
       </div>
+      )}
       <form
         className="mt-2 flex gap-1"
         onSubmit={(e) => {

@@ -18,14 +18,14 @@ const SYSTEM = `너는 부산 국·공유지 검색 조건을 뽑는 도우미�
  "dongs": [{"gu": string|null, "name": string}]|null,
  "purpose": "청사"|"공공주택"|"기타"|null,
  "owners": ("국유지"|"시유지"|"구군유지")[]|null,
- "min_area_m2": number|null,
+ "min_area": {"value": number, "unit": "㎡"|"평"}|null,
  "include_jimok": string[]|null,
  "exclude_jimok": string[]|null,
  "limit": number|null,
  "clarify": string|null
 }
-whole_busan은 부산 전체를 뜻할 때, gus는 구·군 이름, dongs는 읍·면·동 이름(예: 좌동), min_area_m2는 최소 면적(㎡, 평이면 ㎡로 환산), include_jimok은 포함하라고 한 지목, exclude_jimok은 제외하라고 한 지목, limit은 보여 줄 개수, clarify는 알아듣기 어려울 때 사용자에게 되물을 한 문장이야.
-면적 환산: 1평 = 3.3058㎡. '천'은 1000, '만'은 10000이야. 예) 500평 = 1653, 천 평 = 3306, 2천㎡ = 2000, 3만㎡ = 30000. 숫자를 계산하고 반올림해서 정수로 줘.
+whole_busan은 부산 전체를 뜻할 때, gus는 구·군 이름, dongs는 읍·면·동 이름(예: 좌동), min_area는 최소 면적(사용자가 말한 단위 그대로, 환산하지 마), include_jimok은 포함하라고 한 지목, exclude_jimok은 제외하라고 한 지목, limit은 보여 줄 개수, clarify는 알아듣기 어려울 때 사용자에게 되물을 한 문장이야.
+면적은 환산하지 말고 말한 숫자와 단위만 줘. '천'은 1000, '만'은 10000이야. 예) 500평 → {"value":500,"unit":"평"}, 천 평 → {"value":1000,"unit":"평"}, 2천㎡ → {"value":2000,"unit":"㎡"}, 3만 제곱미터 → {"value":30000,"unit":"㎡"}.
 'X 말고', 'X 빼고', 'X 제외'는 exclude_jimok, 'X도 포함', 'X도 같이'는 include_jimok이야. 한 문장에서 X는 한쪽에만 넣어.
 구·군은 ${BUSAN_GUS.map((g) => g.name).join(", ")} 중에서만. 지목은 ${ALL_JIMOK.join(", ")} 중에서만.`;
 
