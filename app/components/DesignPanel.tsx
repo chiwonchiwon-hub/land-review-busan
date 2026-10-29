@@ -187,6 +187,11 @@ export default function DesignPanel({
         <Slider label="층고" value={params.floorHeight} min={2.5} max={6} step={0.1} display={`${params.floorHeight.toFixed(1)}m`} onChange={(v) => onParamsChange({ ...params, floorHeight: v })} />
         <Slider label="대지경계 이격" value={params.setback} min={0} max={10} step={0.5} display={`${params.setback}m`} onChange={(v) => onParamsChange({ ...params, setback: v })} />
         {state?.loading && set && <div className="text-sky-700">다시 계산하는 중…</div>}
+        {!state?.loading && d && params.floors && d.totals.maxFloors > 0 && d.totals.maxFloors < params.floors && (
+          <div className="rounded bg-amber-50 p-1.5 text-amber-800">
+            {params.floors}층은 한도를 넘어 최대 {d.totals.maxFloors}층으로 줄였어요 (연면적·용도 상한 또는 건물 폭 대비 높이 제한).
+          </div>
+        )}
       </div>
 
       {d && (

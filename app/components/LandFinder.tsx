@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import ParcelMap, { groupColor, type MapView } from "./ParcelMap";
 import ReviewPanel, { type ReviewState } from "./ReviewPanel";
 import DesignPanel, { type DesignState } from "./DesignPanel";
@@ -66,7 +66,11 @@ export default function LandFinder() {
   // 리포트 넓게 보기: 검색 패널을 접고 오른쪽 리포트를 넓힘
   const [wide, setWide] = useState(false);
 
+  // 슬라이더를 빠르게 움직이면 요청이 겹치므로, 가장 마지막 요청의 결과만 받아들임
+  const designSeq = useRef(0);
+
   async function loadDesign(group: LandGroup, params: DesignParams) {
+    const seq = ++designSeq.current;
     // 다시 만드는 동안에도 이전 건물은 지도에 남겨 둠
     setDesigns((d) => ({ ...d, [group.id]: { ...d[group.id], loading: true, error: undefined } }));
     try {
@@ -77,6 +81,7 @@ export default function LandFinder() {
         body: JSON.stringify({ pnus: group.parcels.map((p) => p.pnu), purpose: result?.purpose ?? criteria.purpose, ...params }),
       });
       const data = await res.json();
+      if (seq !== designSeq.current) return; // 그 사이 더 새로운 요청이 나갔음
       if (res.ok) {
         const set = data.set as DesignSet;
         setDesigns((d) => {

@@ -6,6 +6,7 @@ import { VWorldError } from "@/lib/vworld";
 export const maxDuration = 300;
 
 const MAX_PARCELS = 60;
+const detailCache = new Map<string, { at: number; promise: ReturnType<typeof reviewLandDetailed> }>();
 const clamp = (n: number, min: number, max: number) => Math.min(max, Math.max(min, n));
 
 // POST /api/land-design  본문: { pnus, purpose?, floorHeight?, setback?, coverage?, floors? }
@@ -28,7 +29,18 @@ export async function POST(request: Request) {
   };
 
   try {
-    const detail = await reviewLandDetailed([...new Set(pnus)]);
+    // 슬라이더로 값만 바꿀 때는 규제 검토 결과를 5분간 다시 씀 (응답이 빨라짐)
+    const ids = [...new Set(pnus)];
+    const key = ids.slice().sort().join(",");
+    const hit = detailCache.get(key);
+    let detailPromise = hit && Date.now() - hit.at < 300_000 ? hit.promise : null;
+    if (!detailPromise) {
+      detailPromise = reviewLandDetailed(ids);
+      detailCache.set(key, { at: Date.now(), promise: detailPromise });
+      detailPromise.catch(() => detailCache.delete(key));
+      if (detailCache.size > 50) detailCache.delete(detailCache.keys().next().value as string);
+    }
+    const detail = await detailPromise;
     return Response.json({ set: designOptions(detail, params, purpose) });
   } catch (e) {
     console.error("land-design failed:", e instanceof Error ? e.message : e);
