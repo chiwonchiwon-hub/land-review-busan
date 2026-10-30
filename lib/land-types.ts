@@ -105,7 +105,7 @@ export type LandReview = {
 // ── 4단계: 3D 건물 디자인 ──
 
 // 건물 배치 안의 종류. 대지 모양에 맞춰 어울리는 안을 추천함
-export type DesignKind = "siteFit" | "bar" | "tower" | "lshape" | "courtyard" | "stepped" | "twin" | "barComplex" | "towerComplex";
+export type DesignKind = "siteFit" | "bar" | "tower" | "lshape" | "courtyard" | "stepped" | "twin" | "barComplex" | "towerComplex" | "vComplex" | "mixedComplex";
 
 export const DESIGN_KIND_NAME: Record<DesignKind, string> = {
   siteFit: "대지 순응형",
@@ -117,6 +117,8 @@ export const DESIGN_KIND_NAME: Record<DesignKind, string> = {
   twin: "병렬 2동형",
   barComplex: "판상형 아파트 단지",
   towerComplex: "타워형 아파트 단지",
+  vComplex: "V자형 아파트 단지",
+  mixedComplex: "혼합형 아파트 단지 (판상+V자+탑상)",
 };
 
 // 사용자가 고칠 수 있는 값. 법으로 정해진 값이 아니라 설계 방향을 정하는 가정값
@@ -141,6 +143,7 @@ export type DesignVolume = {
   floors: number;
   area: number; // 바닥 면적(㎡)
   role: "main" | "base" | "tower" | "wing" | "tier";
+  shape?: "bar" | "L" | "V" | "Y" | "tower"; // 아파트 단지의 동 평면 형태
 };
 
 // 아파트 단지의 법정 부대시설 규모 (lib/complex-plan.ts)

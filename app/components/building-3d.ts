@@ -15,11 +15,12 @@ type Palette = {
   accent: string; // 옥상 구조물·차양 색
   windowRatio: number; // 한 칸에서 창이 차지하는 너비 비율
   fins: boolean; // 세로 루버(수직 살)를 넣을지
+  balcony?: boolean; // 발코니 난간(가로 띠)을 넣을지
 };
 
 const PALETTES: Record<string, Palette> = {
   청사: { wall: "#d9dde2", glass: ["#3b6a99", "#a4cbe8"], mullion: "#2b3a4a", roof: "#6b727c", accent: "#2f3944", windowRatio: 0.92, fins: true },
-  공공주택: { wall: "#f0e6d6", glass: ["#587792", "#b6cbda"], mullion: "#f8f2e8", roof: "#8a7f73", accent: "#b5724a", windowRatio: 0.5, fins: false },
+  공공주택: { wall: "#f3f0e9", glass: ["#6f8fa8", "#c4d8e6"], mullion: "#ffffff", roof: "#8b9096", accent: "#5f6670", windowRatio: 0.62, fins: false, balcony: true },
   기타: { wall: "#e2e5e8", glass: ["#4d7a9c", "#a8c9df"], mullion: "#33414e", roof: "#6c747d", accent: "#3f4852", windowRatio: 0.8, fins: false },
 };
 
@@ -44,6 +45,14 @@ function facadeCanvas(p: Palette, lobby: boolean): HTMLCanvasElement {
   grad.addColorStop(1, p.glass[0]);
   ctx.fillStyle = grad;
   ctx.fillRect(x0, top, winW, size - slab - top - 2);
+
+  if (p.balcony && !lobby) {
+    // 발코니 난간: 창 아래쪽에 흰 가로 띠
+    ctx.fillStyle = "rgba(255,255,255,0.62)";
+    ctx.fillRect(x0, size - slab - 34, winW, 22);
+    ctx.fillStyle = "rgba(60,70,80,0.35)";
+    ctx.fillRect(x0, size - slab - 34, winW, 2);
+  }
 
   ctx.fillStyle = lobby ? "#1f2830" : p.mullion;
   ctx.fillRect(x0 - 1, top - 3, 3, size - slab - top + 3);
@@ -140,6 +149,17 @@ export function buildDesignGroup(design: BuildingDesign): THREE.Group {
   const sideMat = (map: THREE.Texture) =>
     new THREE.MeshStandardMaterial({ map, emissiveMap: map, emissive: new THREE.Color(0xffffff), emissiveIntensity: 0.38, roughness: 0.45, metalness: 0.05 });
   const wallMat = sideMat(wallTex);
+  // 아파트 단지: 동마다 꼭대기 두 층에 다른 색 포인트를 줘 단지가 획일적으로 보이지 않게 함 (동별 다른 디자인)
+  const isApt = design.purpose === "공공주택" && design.buildings.some((bd) => bd.volumes.some((vv) => !!vv.shape));
+  const ACCENTS = ["#6f9bd8", "#e39a7b", "#7fb89a", "#e6c068", "#a58bc9", "#6fbcbc"];
+  const accentWalls = isApt
+    ? ACCENTS.map((c) => {
+        const m = wallMat.clone();
+        m.color = new THREE.Color(c);
+        return m;
+      })
+    : [];
+  let aptIndex = 0;
   const lobbyMat = sideMat(lobbyTex);
   const slabMat = new THREE.MeshStandardMaterial({ color: palette.wall, roughness: 0.8 });
   const roofGray = new THREE.MeshStandardMaterial({ color: palette.roof, roughness: 0.9 });
@@ -187,23 +207,26 @@ export function buildDesignGroup(design: BuildingDesign): THREE.Group {
       };
 
       // 1층은 키 큰 유리(로비), 나머지는 일반 외벽. 재료 순서: [윗면·아랫면, 옆면]
+      const band = isApt && v.floors >= 5 ? 2 * floorH : 0; // 꼭대기 두 층
+      const accent = band > 0 ? accentWalls[aptIndex++ % accentWalls.length] : null;
       if (v.startFloor === 0 && v.floors >= 2) {
         addExtrusion(0, floorH, [slabMat, lobbyMat]);
-        addExtrusion(floorH, height - floorH, [slabMat, wallMat]);
+        addExtrusion(floorH, height - floorH - band, [slabMat, wallMat]);
       } else {
-        addExtrusion(z0, height, [slabMat, wallMat]);
+        addExtrusion(z0, height - band, [slabMat, wallMat]);
       }
+      if (accent) addExtrusion(z0 + height - band, band, [slabMat, accent]);
 
       // 옥상: 덮여 있지 않은 덩어리는 지붕 슬래브, 낮은 덩어리(테라스)는 녹지
       const covered = b.volumes.some((o) => o !== v && o.startFloor === v.startFloor + v.floors && o.floors > 0 && inRing(centroidOf(o.ring), v.ring));
       if (!covered) {
-        const roof = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.5, bevelEnabled: false }), [isTop ? roofGray : roofGreen, slabMat]);
+        const roof = new THREE.Mesh(new THREE.ExtrudeGeometry(shape, { depth: 0.5, bevelEnabled: false }), [isTop || isApt ? roofGray : roofGreen, slabMat]);
         roof.position.z = z0 + height;
         group.add(roof);
 
         if (isTop && !many) {
-          const c = centroidOf(v.ring);
-          if (inRing(c, v.ring) && distToRing(c, v.ring) > 3) {
+          const c = interiorPoint(v.ring);
+          if (distToRing(c, v.ring) > 3) {
             const size = Math.max(2, Math.min(8, distToRing(c, v.ring) * 0.9));
             const hv = Math.min(3.2, floorH * 0.9);
             const box = new THREE.Mesh(new THREE.BoxGeometry(size * 1.4, size, hv), accentMat);
@@ -236,6 +259,27 @@ export function buildDesignGroup(design: BuildingDesign): THREE.Group {
           m.material.side = THREE.DoubleSide;
           group.add(m);
         }
+      }
+    }
+
+    if (isApt) {
+      const tall = b.volumes.filter((vv) => vv.floors >= 14);
+      let pair: [DesignVolume, DesignVolume, number] | null = null;
+      for (let i = 0; i < tall.length; i++) {
+        for (let j = i + 1; j < tall.length; j++) {
+          const pa = interiorPoint(tall[i].ring), pb = interiorPoint(tall[j].ring);
+          const dist = Math.hypot(pa[0] - pb[0], pa[1] - pb[1]);
+          if (dist >= 20 && dist <= 70 && (!pair || dist < pair[2])) pair = [tall[i], tall[j], dist];
+        }
+      }
+      if (pair) {
+        const pa = interiorPoint(pair[0].ring), pb = interiorPoint(pair[1].ring);
+        const zBridge = (Math.min(pair[0].floors, pair[1].floors) - 3) * floorH;
+        const bridge = new THREE.Mesh(new THREE.BoxGeometry(pair[2], 3.4, floorH * 0.95), accentMat);
+        bridge.position.set((pa[0] + pb[0]) / 2, (pa[1] + pb[1]) / 2, zBridge + (floorH * 0.95) / 2);
+        bridge.rotation.z = Math.atan2(pb[1] - pa[1], pb[0] - pa[0]);
+        bridge.name = "스카이브릿지";
+        group.add(bridge);
       }
     }
 
@@ -298,6 +342,26 @@ export function buildDesignGroup(design: BuildingDesign): THREE.Group {
     root.add(trees);
   }
   return root;
+}
+
+// 다각형 안쪽에서 가장자리에서 가장 먼 점 (오목한 형태에서도 안쪽에 놓이게)
+function interiorPoint(ring: XY[]): XY {
+  const xs = ring.map((p) => p[0]), ys = ring.map((p) => p[1]);
+  const [minX, maxX, minY, maxY] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+  let best: XY = centroidOf(ring);
+  let bestD = inRing(best, ring) ? distToRing(best, ring) : -1;
+  for (let i = 1; i < 8; i++) {
+    for (let j = 1; j < 8; j++) {
+      const p: XY = [minX + ((maxX - minX) * i) / 8, minY + ((maxY - minY) * j) / 8];
+      if (!inRing(p, ring)) continue;
+      const d = distToRing(p, ring);
+      if (d > bestD) {
+        best = p;
+        bestD = d;
+      }
+    }
+  }
+  return best;
 }
 
 function centroidOf(ring: XY[]): XY {
