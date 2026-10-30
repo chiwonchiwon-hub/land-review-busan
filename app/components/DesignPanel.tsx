@@ -270,6 +270,8 @@ export default function DesignPanel({
                   <dd className="text-right">{b.complexPlan.communityFacilityArea > 0 ? `${fmt(b.complexPlan.communityFacilityArea)}㎡ 이상` : "의무 없음"}</dd>
                   <dt className="text-zinc-600">조경</dt>
                   <dd className="text-right">{b.complexPlan.landscapeRequired > 0 ? `${fmt(b.complexPlan.landscapeRequired)}㎡ 이상` : "의무 없음"}</dd>
+                  <dt className="text-zinc-600">진입도로 기준 폭</dt>
+                  <dd className="text-right">{b.complexPlan.entryRoadWidth}m 이상</dd>
                   <dt className="text-zinc-600">외부 공간</dt>
                   <dd className={`text-right ${b.complexPlan.openSpaceEnough ? "" : "text-amber-700"}`}>
                     {fmt(b.complexPlan.openSpace)}㎡ {b.complexPlan.openSpaceEnough ? "(충분)" : "(부족할 수 있음)"}

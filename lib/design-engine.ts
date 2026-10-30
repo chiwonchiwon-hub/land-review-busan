@@ -441,7 +441,7 @@ function layout(vols: VolArea[], mode: FloorsMode, N: number): Pick<DesignVolume
   return [{ startFloor: 0, floors: f1 }, { startFloor: f1, floors: f2 }, { startFloor: f1 + f2, floors: f3 }];
 }
 
-type Job = { zone: string | null; shape: Poly; maxB: number; maxF: number; limit?: UseLimit; ruleZone?: string | null; heightCapFloors?: number };
+type Job = { zone: string | null; shape: Poly; maxB: number; maxF: number; limit?: UseLimit; ruleZone?: string | null; heightCapFloors?: number; roadWidth?: number | null };
 
 function chooseFloors(
   buildings: VolArea[][],
@@ -631,6 +631,11 @@ function buildComplex(kind: "barComplex" | "towerComplex", job: Job, base: { pro
     plan.communityFacilityArea > 0 ? `주민공동시설 ${plan.communityFacilityArea.toLocaleString("ko-KR")}㎡ 이상 필요 (제55조의2)` : "100세대 미만이라 주민공동시설 설치 의무가 없습니다 (제55조의2)",
     plan.landscapeRequired > 0 ? `조경 ${plan.landscapeRequired.toLocaleString("ko-KR")}㎡ 이상 (부산광역시 건축 조례 제25조)` : "녹지지역이라 조경 설치 의무가 없습니다 (건축법 시행령 제27조)",
     plan.openSpaceEnough ? "건축면적을 뺀 외부 공간이 조경과 단지 안 도로(폭 7m 이상, 제26조)를 담기에 충분합니다." : "건축면적을 뺀 외부 공간이 조경과 단지 안 도로를 담기에 부족할 수 있어 동 수나 건축면적 사용률을 줄여야 할 수 있습니다.",
+    job.roadWidth == null
+      ? `단지 진입도로: 총 ${plan.households.toLocaleString("ko-KR")}세대면 기간도로와 접하는 폭 또는 진입도로 폭이 ${plan.entryRoadWidth}m 이상이어야 합니다 (주택건설기준 규정 제25조). 접한 도로 폭을 확인하지 못해 따로 확인해야 합니다.`
+      : job.roadWidth >= plan.entryRoadWidth
+        ? `단지 진입도로: 접한 도로 폭 ${job.roadWidth}m가 기준 ${plan.entryRoadWidth}m 이상입니다 (주택건설기준 규정 제25조, 국가기본도 폭 기준).`
+        : `단지 진입도로 기준 미달 가능: 총 ${plan.households.toLocaleString("ko-KR")}세대는 폭 ${plan.entryRoadWidth}m 이상 도로가 필요한데 접한 도로의 폭은 ${job.roadWidth}m로 적혀 있습니다 (제25조). 도로 폭 자료가 모를 때 3m로 적는 경우가 많아 실제 폭을 확인해야 하며, 진입도로가 둘 이상이면 합계 기준(제25조③)으로 완화될 수 있습니다.`,
     plan.undergroundFloors > 4 ? "지하주차장이 지하 4층을 넘어 현실적이지 않을 수 있어 세대수·주차 방식 조정이 필요합니다." : "",
     "도로·공원에 접한 쪽의 경계 완화, 동지 기준 2시간 일조 확보로 거리를 줄이는 방법, 부대·복리시설, 정북 방향 일조 사선의 세부 검토는 반영하지 않았습니다.",
   ];
@@ -818,6 +823,7 @@ export function designOptions(detail: ReviewDetail, paramsIn: DesignParams, purp
   const baseNotes = [
     `층고 ${params.floorHeight}m, 대지경계에서 ${params.setback}m 띄움, 건축면적 사용률 ${Math.round(params.coverage * 100)}%는 설계 방향을 정하는 가정값입니다 (법으로 정해진 값이 아님).`,
     "여러 덩어리를 조합한 배치 검토용 모형입니다. 건축 설계 도면이 아닙니다.",
+    "대지의 안전(건축법 제40조): 대지는 인접 도로면보다 낮지 않아야 하고, 습한 토지·매립지는 성토·지반 개량이, 무너질 우려가 있는 땅은 옹벽 등이 필요합니다. 지형·지반 자료가 없어 계산에 반영하지 않았습니다.",
     `건물 높이는 짧은 변 길이의 ${SLENDER}배 이하로 제한했습니다 (지나치게 가는 건물을 막기 위한 가정이며 법 기준이 아님).`,
     "높이 제한(고도지구·경관지구 등), 일조·채광 사선 제한, 건축선, 주차장·조경·공개공지 면적, 인접 대지와의 이격 규정은 반영하지 않았습니다. 도로 접면 요건(건축법 제44조: 연면적 2,000㎡ 이상은 너비 6m 이상 도로에 4m 이상 접해야 함)도 검토 화면의 \"확인 필요\"에서 따로 확인하세요.",
   ];
@@ -871,6 +877,7 @@ export function designOptions(detail: ReviewDetail, paramsIn: DesignParams, purp
       return {
         ...j,
         maxB: Number.isFinite(bcrCap) ? Math.min(j.maxB, (turf.area(j.shape) * bcrCap) / 100) : j.maxB,
+        roadWidth: review.roadAccess?.bestWidth ?? null,
         heightCapFloors: Number.isFinite(heightCap) ? Math.max(1, Math.floor(heightCap / params.floorHeight)) : undefined,
       };
     });

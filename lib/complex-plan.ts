@@ -8,6 +8,8 @@
 //    (150세대 이상 경로당·어린이놀이터, 300세대 이상 어린이집, 500세대 이상 주민운동시설·작은도서관·다함께돌봄센터 포함: 제3항)
 //  · 조경: 부산광역시 건축 조례 제25조제1항 — 연면적 2,000㎡ 이상 대지면적의 15%, 1,000~2,000㎡ 10%, 1,000㎡ 미만 5%
 //    (녹지지역 건축물은 조경 제외: 건축법 시행령 제27조제1항제1호)
+//  · 진입도로: 단지는 기간도로에 접하거나 진입도로가 있어야 하고 그 폭은 총세대수로 정해짐 — 300세대 미만 6m, 300~500 8m, 500~1천 12m,
+//    1천~2천 15m, 2천 이상 20m (같은 규정 제25조제1항). 진입도로가 둘 이상이면 제25조제3항의 합계 기준으로 완화 가능(반영 안 함)
 // 아래 ASSUMED는 법에 정해져 있지 않아 제가 가정한 값입니다. 화면에도 가정으로 표시해요.
 
 import type { ComplexPlan } from "./land-types";
@@ -21,6 +23,8 @@ export const ASSUMED = {
 };
 
 export const COMPLEX_OPEN_SPACE_CAP = 0.65; // 건축면적이 대지면적의 65%를 넘지 않게 (조경 15% + 도로·보행공간 등 20%를 남기려는 가정)
+
+export const entryRoadWidthFor = (households: number) => (households < 300 ? 6 : households < 500 ? 8 : households < 1000 ? 12 : households < 2000 ? 15 : 20);
 
 const community = (households: number) => (households < 100 ? 0 : households < 1000 ? households * 2.5 : 500 + households * 2);
 
@@ -70,5 +74,6 @@ export function planComplex(input: {
     roadAreaEstimate: Math.round(roadAreaEstimate),
     openSpace: Math.round(openSpace),
     openSpaceEnough: openSpace >= openNeeded,
+    entryRoadWidth: entryRoadWidthFor(households),
   };
 }

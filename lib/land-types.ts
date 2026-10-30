@@ -155,6 +155,7 @@ export type ComplexPlan = {
   roadAreaEstimate: number; // 단지 안 도로 면적 어림(㎡)
   openSpace: number; // 건축면적을 뺀 외부 공간(㎡)
   openSpaceEnough: boolean; // 외부 공간이 조경 + 도로를 담기에 충분한지
+  entryRoadWidth: number; // 단지가 접해야 하는 기간도로 또는 진입도로의 최소 폭(m)
 };
 
 export type DesignedBuilding = {
