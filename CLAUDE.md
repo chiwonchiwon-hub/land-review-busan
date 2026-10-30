@@ -12,6 +12,7 @@ Next.js 코드를 쓰기 전에 `node_modules/next/dist/docs/`의 해당 안내�
 ## 명령 (Windows PowerShell)
 - 개발 서버: `npm.cmd run dev` / 타입 검사: `npx.cmd tsc --noEmit` / 린트: `npx.cmd eslint .` / 빌드: `npm.cmd run build`
 - 부산 전체 데이터 만들기(최초 1회, 약 10분, 중간에 끊겨도 이어서 진행): `node --env-file=.env scripts/build-busan-data.mjs` (`--gu=26500`, `--steps=zoning,dongs,zones,edges`, `--force`)
+- 지자체 조례 자동 수집(LAW_OC 필요): `node --env-file=.env scripts/ingest-ordinance.mjs --city "세종특별자치시"` → `data/ordinances/`에 저장, 부산 수작업 표와 대조: `node scripts/check-ordinance.mjs 부산광역시`
 - 검산표 만들기: `scripts/make-reviewer-sheet.mjs` (부산 구·군 코드에 맞게 수정 필요)
 
 ## 폴더 구조
