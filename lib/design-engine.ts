@@ -441,7 +441,7 @@ function layout(vols: VolArea[], mode: FloorsMode, N: number): Pick<DesignVolume
   return [{ startFloor: 0, floors: f1 }, { startFloor: f1, floors: f2 }, { startFloor: f1 + f2, floors: f3 }];
 }
 
-type Job = { zone: string | null; shape: Poly; maxB: number; maxF: number; limit?: UseLimit; ruleZone?: string | null };
+type Job = { zone: string | null; shape: Poly; maxB: number; maxF: number; limit?: UseLimit; ruleZone?: string | null; heightCapFloors?: number };
 
 function chooseFloors(
   buildings: VolArea[][],
@@ -551,7 +551,7 @@ function buildComplex(kind: "barComplex" | "towerComplex", job: Job, base: { pro
 
   const floorCapArea = job.limit?.floorAreaLt !== undefined ? capBelow(job.limit.floorAreaLt) : undefined;
   const maxF = floorCapArea !== undefined ? Math.min(job.maxF, floorCapArea) : job.maxF;
-  const floorsCap = Math.min(MAX_FLOORS, job.limit?.maxFloors ?? MAX_FLOORS);
+  const floorsCap = Math.min(MAX_FLOORS, job.limit?.maxFloors ?? MAX_FLOORS, job.heightCapFloors ?? MAX_FLOORS);
   const siteArea = turf.area(job.shape);
   const targetB = Math.min(job.maxB * clamp(params.coverage, 0.3, 1), siteArea * COMPLEX_OPEN_SPACE_CAP) * SAFETY;
   const dims: CxDim[] = kind === "barComplex" ? [{ w: 62, d: 13 }, { w: 50, d: 13 }, { w: 38, d: 13 }] : [{ w: 27, d: 27 }, { w: 23, d: 23 }];
@@ -691,7 +691,7 @@ function buildJob(kind: DesignKind, job: Job, ctxBase: { proj: Proj; params: Des
       continue;
     }
 
-    const chosen = chooseFloors(vols, plan.mode, maxF, params, job.limit?.maxFloors);
+    const chosen = chooseFloors(vols, plan.mode, maxF, params, Math.min(job.limit?.maxFloors ?? MAX_FLOORS, job.heightCapFloors ?? MAX_FLOORS));
     if (!chosen) return null;
 
     const out: DesignedBuilding[] = [];
@@ -862,7 +862,21 @@ export function designOptions(detail: ReviewDetail, paramsIn: DesignParams, purp
           const shape = partShapes.get(p.zone);
           return shape ? [{ zone: p.zone, shape, maxB: p.maxBuildingArea, maxF: p.maxFloorArea }] : [];
         })
-  ).map((j) => ({ ...j, limit: limits.find((l) => l.zone === j.zone) ?? limits[0], ruleZone: j.zone ?? review.parts[0]?.zone ?? null }));
+  ).map((j) => ({ ...j, limit: limits.find((l) => l.zone === j.zone) ?? limits[0], ruleZone: j.zone ?? review.parts[0]?.zone ?? null }))
+    .map((j) => {
+      // 용도지구가 정한 건폐율·높이(경관지구 등)를 반영
+      const caps = review.districtCaps ?? [];
+      const bcrCap = Math.min(...caps.map((c) => c.bcr ?? Infinity));
+      const heightCap = Math.min(...caps.map((c) => c.height ?? Infinity));
+      return {
+        ...j,
+        maxB: Number.isFinite(bcrCap) ? Math.min(j.maxB, (turf.area(j.shape) * bcrCap) / 100) : j.maxB,
+        heightCapFloors: Number.isFinite(heightCap) ? Math.max(1, Math.floor(heightCap / params.floorHeight)) : undefined,
+      };
+    });
+  for (const c of review.districtCaps ?? []) {
+    baseNotes.push(`${c.name}: ${c.bcr !== undefined ? `건폐율 ${c.bcr}% 이하 ` : ""}${c.height !== undefined ? `높이 ${c.height}m 이하 ` : ""}${c.landscape !== undefined ? `조경 ${c.landscape}% 이상 ` : ""}를 반영했습니다 (${c.reason.split("(").pop()?.replace(")", "") ?? "조례"}).`);
+  }
 
   const margin = Math.max(params.setback, MIN_MARGIN);
   const commonNotes = [...baseNotes];

@@ -91,7 +91,7 @@ async function limited<T>(fn: () => Promise<T>): Promise<T> {
 
 // 면적이 큰 필지 4개의 토지이용계획에서 건축 불가 지역·지구(도로·공원·학교 시설 부지, 개발제한구역 등)에 '포함'된 비율을 봄.
 // 면적의 절반 이상이면 제외. 조회에 실패한 필지는 판단하지 않고 그대로 둠(제외하지 않음).
-async function inNoBuildZone(group: LandGroup): Promise<boolean> {
+async function inNoBuildZone(group: LandGroup, purpose: string): Promise<boolean> {
   const sample = [...group.parcels].sort((a, b) => b.area - a.area).slice(0, 4);
   let checked = 0;
   let blocked = 0;
@@ -100,7 +100,7 @@ async function inNoBuildZone(group: LandGroup): Promise<boolean> {
       try {
         const rows = await limited(() => loadLandUse(p.pnu));
         checked += p.area;
-        if (classifyLandUse(rows).blocking.length > 0) blocked += p.area;
+        if (classifyLandUse(rows, purpose).blocking.length > 0) blocked += p.area;
       } catch {
         // 조회하지 못한 필지는 건너뜀
       }
@@ -140,7 +140,7 @@ async function exact(group: LandGroup, purpose: string): Promise<Verdict> {
   let verdict: Verdict;
   if (a.overall === "not_allowed") verdict = { keep: false, reason: "use", use };
   else if (a.overall === "unknown") verdict = { keep: false, reason: "unsupported", use };
-  else if (await inNoBuildZone(group)) verdict = { keep: false, reason: "nobuild", use };
+  else if (await inNoBuildZone(group, purpose)) verdict = { keep: false, reason: "nobuild", use };
   else if (await isLandlocked(group)) verdict = { keep: false, reason: "noroad", use };
   else verdict = { keep: true, reason: null, use };
   cache.set(key, { at: Date.now(), verdict });

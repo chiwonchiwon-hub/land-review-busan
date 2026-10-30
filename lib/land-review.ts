@@ -3,7 +3,7 @@
 
 import * as turf from "@turf/turf";
 import { getLandUse, VWorldError, type LandUseRow } from "./vworld";
-import { classifyParcels, roadAccessCheck } from "./no-build";
+import { classifyParcels, districtCapsOf, roadAccessCheck } from "./no-build";
 import { checkRoadAccess, type RoadAccess } from "./road-access";
 import type { NoBuildHit } from "./land-types";
 import { NON_URBAN_NOT_ALLOWED } from "./non-urban-rules";
@@ -282,6 +282,10 @@ export async function reviewLandDetailed(pnus: string[], options: { skipLandUse?
       else if (planned) checks.push(planned);
     }
   }
+  const noBuildAll = classifyParcels(
+    pnus.map((pnu, i) => ({ area: dongs[pnu.slice(0, 8)].parcels[pnu].area, rows: landUseLists[i] ?? [] })),
+    siteArea,
+  );
   const used = new Set<string>();
   for (const l of applies) {
     const rule = OVERRIDE_KEYWORDS.find((k) => l.name.includes(k.keyword));
@@ -341,11 +345,9 @@ export async function reviewLandDetailed(pnus: string[], options: { skipLandUse?
     multiZone,
     landUse,
     roadAccess,
+    districtCaps: districtCapsOf([...noBuildAll.blocking, ...noBuildAll.caution]),
     noBuild: mergeNoBuild(
-      classifyParcels(
-        pnus.map((pnu, i) => ({ area: dongs[pnu.slice(0, 8)].parcels[pnu].area, rows: landUseLists[i] ?? [] })),
-        siteArea,
-      ),
+      noBuildAll,
       nonUrbanBlocking,
     ),
     checks,

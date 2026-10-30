@@ -175,11 +175,11 @@ export default function ReviewPanel({
                 </div>
               )}
 
-              {r.noBuild.blocking.length > 0 && (
+              {r.noBuild.blocking.filter((h) => !h.purposes || h.purposes.includes(purpose)).length > 0 && (
                 <div className="rounded border border-red-300 bg-red-50 p-2 text-xs" data-no-build>
                   <div className="mb-1 font-semibold text-red-900">건축할 수 없는 지역·지구에 포함된 필지가 있어요</div>
                   <ul className="list-disc space-y-1 pl-4 text-red-900">
-                    {r.noBuild.blocking.map((h) => (
+                    {r.noBuild.blocking.filter((h) => !h.purposes || h.purposes.includes(purpose)).map((h) => (
                       <li key={h.name}>
                         <span className="font-medium">{h.name}</span> — {h.reason}
                         {h.parcels !== undefined && h.areaShare !== undefined && (

@@ -73,7 +73,15 @@ export type ZonePart = {
 };
 
 // 건축할 수 없거나 제한이 큰 지역·지구 (lib/no-build.ts)
-export type NoBuildHit = { name: string; relation: string; reason: string; parcels?: number; areaShare?: number }; // parcels·areaShare: 그 지구에 걸린 필지 수와 대지 면적 대비 비율(0~1)
+export type NoBuildHit = {
+  name: string;
+  relation: string;
+  reason: string;
+  parcels?: number;
+  areaShare?: number;
+  purposes?: string[]; // 이 용도에만 해당하는 규정이면 그 용도 목록 (없으면 모든 용도)
+  caps?: { bcr?: number; height?: number; landscape?: number }; // 지구가 정한 건폐율(%)·높이(m)·조경(%)
+}; // parcels·areaShare: 그 지구에 걸린 필지 수와 대지 면적 대비 비율(0~1)
 
 export type LandReview = {
   pnus: string[];
@@ -87,6 +95,7 @@ export type LandReview = {
   multiZone: null | { smallestPart: number; rule: "weighted" | "separate"; text: string };
   landUse: { name: string; relation: string }[]; // 용도지역 외 지역·지구 (포함·저촉)
   noBuild: { blocking: NoBuildHit[]; caution: NoBuildHit[] }; // 건축 불가(포함)·확인 필요 지역·지구
+  districtCaps: { name: string; bcr?: number; height?: number; landscape?: number; reason: string }[]; // 용도지구가 정한 수치(면적의 절반 이상이 그 지구에 포함될 때)
   roadAccess: { status: "ok" | "short" | "narrow" | "none" | "unknown"; bestWidth: number | null; wideContactM: number; note: string } | null; // 접도 요건(건축법 제44조) 판정. 확인하지 않았으면 null
   checks: string[]; // "확인 필요" 안내
   relaxations: readonly string[];
